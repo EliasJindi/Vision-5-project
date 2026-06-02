@@ -1,3 +1,9 @@
 venv/
 __pycache__/
 *.pyc
+
+# Ignorera röstmotorn och tunga AI-modeller
+*.tar.gz
+*.onnx
+*.onnx.json
+piper/
