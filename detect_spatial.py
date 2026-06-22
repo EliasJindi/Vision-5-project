@@ -1,3 +1,4 @@
+from audio_manager import audio_system
 import depthai as dai
 import blobconverter
 import subprocess
@@ -76,26 +77,17 @@ class DetectionFilter:
 class AudioSystem:
     """
     ANSVAR: Äger det rena gränssnittet mot operativsystemets ljudenheter.
-    Syntetiserar inskickad sträng till tal via Piper och spelar upp via PipeWire.
+    Använder nu den trådade och prioriterade audio_system-managern centralt.
     """
     def __init__(self):
-        self.piper_path = "./piper/piper"
-        self.model_path = "sv_SE-alma-medium.onnx"
+        # Denna klass delegerar nu allt till vår externa audio_manager
+        pass
 
-    def speak(self, text):
-        """Tar emot en färdigformaterad textsträng och strömmar en WAV-fil via pw-play."""
-        print(f"🔊 Alma säger: {text}")
-        
-        command = (
-            f'echo "{text}" | {self.piper_path} --model {self.model_path} --output_file - '
-            f'| pw-play -'
-        )
-        
-        try:
-            # Popen körs asynkront i bakgrunden så att kamerasynen aldrig laggar
-            subprocess.Popen(command, shell=True)
-        except Exception as e:
-            print(f"❌ Fel i ljudsystemet (Piper/pw-play): {e}")
+    def speak(self, text, is_emergency=False):
+        """Slussar meddelandet vidare till prioriteringskön."""
+        # Om det är en akut trafik/person-varning sätter vi prioritet 1, annars standard 3 (Gemini/OCR)
+        priority = 1 if is_emergency else 3
+        audio_system.speak(text, priority=priority)
 
 
 class VisionSystem:
@@ -127,7 +119,6 @@ class VisionSystem:
         stereo = self.pipeline.create(dai.node.StereoDepth)
         spatial_nn = self.pipeline.create(dai.node.YoloSpatialDetectionNetwork)
         
-        # YOLOv4-Tiny hårdvarukonfiguration
         spatial_nn.setConfidenceThreshold(threshold)
         spatial_nn.setNumClasses(80)
         spatial_nn.setCoordinateSize(4)
@@ -137,11 +128,8 @@ class VisionSystem:
         spatial_nn.setBlobPath(blobconverter.from_zoo(name="yolov4_tiny_coco_416x416", zoo_type="depthai", shaves=5))
         spatial_nn.setBoundingBoxScaleFactor(0.5)
 
-        # STRÖM 1: Synkronisera kamerasensorerna till 416x416 pixlar för YOLO
         cam_rgb.setPreviewSize(416, 416)  
         cam_rgb.setInterleaved(False)
-        
-        # STRÖM 2: Konfigurera videoströmmen till Full HD (1080p) för moln-OCR
         cam_rgb.setVideoSize(1920, 1080)
 
         left.setBoardSocket(dai.CameraBoardSocket.CAM_B)
@@ -149,18 +137,15 @@ class VisionSystem:
         stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.DEFAULT)
         stereo.setDepthAlign(dai.CameraBoardSocket.CAM_A)
 
-        # Länka ihop hårdvarunoderna på kamerans chip
         left.out.link(stereo.left)
         right.out.link(stereo.right)
         cam_rgb.preview.link(spatial_nn.input)
         stereo.depth.link(spatial_nn.inputDepth)
 
-        # Skapa XLink-utgångskö för YOLO-detektioner till Pajen
         xout_det = self.pipeline.create(dai.node.XLinkOut)
         xout_det.setStreamName("detections")
         spatial_nn.out.link(xout_det.input)
 
-        # Skapa XLink-utgångskö för 1080p-videorutor till Pajen
         xout_video = self.pipeline.create(dai.node.XLinkOut)
         xout_video.setStreamName("video")
         cam_rgb.video.link(xout_video.input)
@@ -179,7 +164,6 @@ class VisionGlasses:
         self.filter = DetectionFilter(cooldown_seconds=3.0, distance_threshold_meters=0.4, emergency_distance_meters=3.0)
         self.audio = AudioSystem()
         
-        # Instansiera den fristående Gemini-modulen (Lös koppling)
         self.ai_service = GeminiService()
         self.is_gemini_processing = False
 
@@ -190,12 +174,12 @@ class VisionGlasses:
             img_path = "gemini_capture.jpg"
             cv2.imwrite(img_path, frame)
 
-            # Skicka bilden till den externa servicen
             answer = self.ai_service.analyze_frame(img_path)
-            self.audio.speak(answer)
+            # Skicka som standardprioritet (Nivå 3) till ljudsystemet
+            self.audio.speak(answer, is_emergency=False)
 
         except Exception as e:
-            print(f"❌ Fel under asynkrons Gemini-körning: {e}")
+            print(f"❌ Fel under asynkron Gemini-körning: {e}")
         finally:
             self.is_gemini_processing = False
 
@@ -213,24 +197,18 @@ class VisionGlasses:
                 while True:
                     in_det = q_det.get()
                     detections = in_det.detections
-                    
-                    # Hämta den senaste högupplösta videorutan (icke-blockerande)
                     in_video = q_video.tryGet()
 
-                    # Hjärtslag / Debug-indikator
                     if time.time() - last_heartbeat > 2.0:
                         print(f"⏱️  Letar aktivt... (Hittade {len(detections)} objekt i denna bildruta)")
                         last_heartbeat = time.time()
 
-                    # ICKE-BLOCKERANDE TANGENTBORDSLYSSNARE (select-multiplexering)
                     if select.select([sys.stdin], [], [], 0)[0]:
-                        sys.stdin.readline()  # Rensa bort Enter-trycket ur bufferten
+                        sys.stdin.readline()  
                         
                         if not self.is_gemini_processing and in_video is not None:
                             print("\n🔘 [FYSISK TRIGGER] Knapptryck registrerat! Aktiverar intelligent OCR via Gemini...")
                             high_res_frame = in_video.getCvFrame()
-                            
-                            # Starta molntjänsten i en daemon-tråd
                             threading.Thread(target=self._call_gemini_async, args=(high_res_frame,), daemon=True).start()
 
                     # REAL-TIDS YOLO-LOOP
@@ -244,12 +222,17 @@ class VisionGlasses:
                             if should_notify:
                                 dist_str = f"{distance:.1f}".replace('.', ',')
                                 
+                                # Om det också råkar vara en person väldigt nära, flaggar vi den som akut
+                                if label == "person" and distance <= 1.0:
+                                    is_emergency = True
+
                                 if is_emergency:
                                     speech_text = f"Akut varning. {label} nära. {dist_str} meter."
                                 else:
                                     speech_text = f"{label}. {dist_str} meter."
                                     
-                                self.audio.speak(speech_text)
+                                # Vi skickar med nödläges-flaggan så att ljudmanagern vet om den ska avbryta pågående ljud
+                                self.audio.speak(speech_text, is_emergency=is_emergency)
                     
                     time.sleep(0.01)
             except KeyboardInterrupt:
