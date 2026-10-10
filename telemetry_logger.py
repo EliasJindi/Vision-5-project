@@ -41,14 +41,18 @@ class TelemetryLogger:
         except queue.Full:
             pass
 
-    def start_vitals(self, qsize_fn=None, interval=5.0):
-        """Loggar temperatur, throttling-status och ljudköns längd var 'interval' sekund."""
+    def start_vitals(self, qsize_fn=None, interval=1.0):
+        """Loggar temperatur, spänning, throttling-status och ljudköns längd var 'interval' sekund."""
         def loop():
             while not self._stop.is_set():
+                throttled = self._read_throttled()
                 self.log(
                     "vitals",
                     temp_c=self._read_temp(),
-                    throttled=self._read_throttled(),
+                    voltage_v=self._read_voltage(),
+                    throttled=throttled,
+                    # Bit 0 = underspänning JUST NU (bit 16 är "har hänt sedan boot" och säger inget om när)
+                    undervolt_now=self._bit(throttled, 0),
                     audio_qsize=qsize_fn() if qsize_fn else None,
                 )
                 self._stop.wait(interval)
@@ -91,6 +95,27 @@ class TelemetryLogger:
             return out.split("=")[-1]  # t.ex. '0x0'
         except Exception:
             return None
+
+    @staticmethod
+    def _bit(hex_str, bit):
+        try:
+            return bool(int(hex_str, 16) & (1 << bit))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _read_voltage():
+        """EXT5V_V från PMIC = spänningen in i Pi:n. Under ca 4,63 V varnar Pi:n för underspänning."""
+        try:
+            out = subprocess.run(
+                ["vcgencmd", "pmic_read_adc", "EXT5V_V"], capture_output=True, text=True, timeout=1
+            ).stdout
+            for line in out.splitlines():
+                if "EXT5V_V" in line:
+                    return round(float(line.split("=")[-1].strip().rstrip("V")), 3)
+        except Exception:
+            pass
+        return None
 
 
 # Global instans, på samma sätt som audio_system

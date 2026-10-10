@@ -1,7 +1,10 @@
 from google import genai
+from google.genai import types
 from PIL import Image
 import os
-import concurrent.futures
+
+# Max väntetid på Gemini. OBS: HttpOptions.timeout är i MILLISEKUNDER.
+GEMINI_TIMEOUT_MS = 10_000
 
 class GeminiService:
     """
@@ -14,7 +17,12 @@ class GeminiService:
         api_key = os.environ.get("GEMINI_API_KEY")
         if api_key:
             # Modern SDK-initialisering
-            self.client = genai.Client(api_key=api_key)
+            # Timeouten måste sitta i HTTP-klienten. En timeout på en tråd-future
+            # avbryter inte själva anropet (se commit-meddelandet).
+            self.client = genai.Client(
+                api_key=api_key,
+                http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS),
+            )
             print("✅ Gemini AI-Service (Modern SDK v2.5) har initierats framgångsrikt.")
         else:
             self.client = None
@@ -61,12 +69,8 @@ class GeminiService:
 
         try:
             with Image.open(image_path) as pil_img:
-                # Använd en tråd-pool för att tvinga fram en timeout på 10 sekunder
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(self._make_api_call, pil_img, prompt)
-                    
-                    # Väntar max 10.0 sekunder, annars kastas TimeoutError
-                    response = future.result(timeout=10.0)
+                # Avbryts av HTTP-klienten efter GEMINI_TIMEOUT_MS
+                response = self._make_api_call(pil_img, prompt)
 
                 # Säkerhetskontroll: Om filtren blockerade svaret eller nätverket returnerade tomt
                 if not response or not response.text:
@@ -75,14 +79,14 @@ class GeminiService:
                 
                 return response.text.strip()
                 
-        except concurrent.futures.TimeoutError:
-            print("⏳ [GeminiService] Nätverkstimeout! Gemini tog för lång tid (över 10s).")
-            return "Nätverksproblem, dålig täckning." if mode == "describe" else None
-            
         except ValueError as ve:
             print(f"🛡️ [GeminiService] Blockerat svar (Safety/Filter): {ve}")
             return "Analysen blockerades av ett filter." if mode == "describe" else None
             
         except Exception as e:
+            # Timeout (httpx.TimeoutException), inget nät, 429 rate limit m.m. hamnar här
+            if "timeout" in type(e).__name__.lower() or "timed out" in str(e).lower():
+                print("⏳ [GeminiService] Nätverkstimeout! Gemini tog för lång tid.")
+                return "Nätverksproblem, dålig täckning." if mode == "describe" else None
             print(f"❌ [GeminiService] Kritiskt nätverks- eller API-fel: {e}")
             return "Kunde inte nå nätverket." if mode == "describe" else None

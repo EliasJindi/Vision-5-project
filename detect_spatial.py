@@ -8,6 +8,7 @@ import cv2
 import sys
 import select
 import uuid
+import os
 from collections import Counter  # <-- För att räkna filterbeslut
 
 # Importera din fristående AI-modul enligt modularitetsprincipen
@@ -39,7 +40,7 @@ class DetectionFilter:
         self.global_last_spoken_time = 0
 
         # Sortera bort spökdetektioner och orelevanta inomhusobjekt utomhus
-        self.blacklist = {"flygplan", "paraply", "frisbee", "drake", "slips", "sportboll", "handvaska"}
+        self.blacklist = {"flygplan", "paraply", "frisbee", "drake", "slips", "sportboll", "handväska"}
         
         # Högprioriterade trafikobjekt (Liv och död vid utomhusnavigering + person i närheten)
         self.high_priority = {"person", "bil", "buss", "lastbil", "motorcykel", "cykel", "trafikljus", "stoppskylt"}
@@ -89,9 +90,8 @@ class DetectionFilter:
             self._update_state_global(current_time)
             self._update_object_state(label, distance, current_time)
             
-            # Navigeringskritiska objekt (Dörrar/Hinder) får prio 2, resten prio 3
-            prio = 2 if label in ["dörr", "trappa"] else 3
-            return True, False, prio
+            # COCO saknar dörrar/trappor, så YOLO-objekt är alltid nivå 3 (trappor sköts av evaluate_stair_drop)
+            return True, False, 3
             
         # TELEMETRI: Logga varför det blockerades
         if not per_label_cooldown_passed:
@@ -157,26 +157,26 @@ class AudioSystem:
     def __init__(self):
         pass
 
-    def speak(self, text, priority=3, t_detect=None):
+    def speak(self, text, priority=3, t_detect=None, key=None):
         msg_id = telemetry.new_id()
-        audio_system.speak(text, priority=priority, msg_id=msg_id, t_detect=t_detect)
+        audio_system.speak(text, priority=priority, msg_id=msg_id, t_detect=t_detect, key=key)
 
 
 class VisionSystem:
     def __init__(self, confidence_threshold=0.35):
         self.pipeline = dai.Pipeline()
         self.label_map = [
-            "person", "cykel", "bil", "motorcykel", "flygplan", "buss", "tag", "lastbil", "bat", 
-            "trafikljus", "brandpost", "stoppskylt", "parkeringsmatare", "bank", "fagel", "katt", 
-            "hund", "hast", "far", "ko", "elefant", "bjorn", "zebra", "giraff", "ryggsack", 
-            "paraply", "handvaska", "slips", "resvaska", "frisbee", "skidor", "snowboard", 
-            "sportboll", "drake", "basebolltradd", "basebollhandske", "skateboard", "surfbrada", 
-            "tennisracket", "flaska", "vinglas", "kopp", "gaffel", "kniv", "sked", "skal", 
-            "banan", "apple", "smorgas", "apelsin", "broccoli", "morot", "varmkorv", "pizza", 
-            "donut", "tarta", "stol", "soffa", "krukvast", "sang", "matbord", "toalett", 
-            "tv-skarm", "barbar dator", "datormus", "fjarrkontroll", "tangentbord", "mobiltelefon", 
-            "mikrovagsugn", "ugn", "brodroster", "diskho", "kylskap", "bok", "klocka", 
-            "vas", "sax", "nallebjorn", "hartork", "tandborste"
+            "person", "cykel", "bil", "motorcykel", "flygplan", "buss", "tåg", "lastbil", "båt",
+            "trafikljus", "brandpost", "stoppskylt", "parkeringsmätare", "bänk", "fågel", "katt",
+            "hund", "häst", "får", "ko", "elefant", "björn", "zebra", "giraff", "ryggsäck",
+            "paraply", "handväska", "slips", "resväska", "frisbee", "skidor", "snowboard",
+            "sportboll", "drake", "basebollträ", "basebollhandske", "skateboard", "surfbräda",
+            "tennisracket", "flaska", "vinglas", "kopp", "gaffel", "kniv", "sked", "skål",
+            "banan", "äpple", "smörgås", "apelsin", "broccoli", "morot", "varmkorv", "pizza",
+            "munk", "tårta", "stol", "soffa", "krukväxt", "säng", "matbord", "toalett",
+            "tv", "bärbar dator", "datormus", "fjärrkontroll", "tangentbord", "mobiltelefon",
+            "mikrovågsugn", "ugn", "brödrost", "diskho", "kylskåp", "bok", "klocka",
+            "vas", "sax", "nalle", "hårtork", "tandborste"
         ]
         self._setup_pipeline(confidence_threshold)
         
@@ -247,9 +247,9 @@ class VisionGlasses:
     def _call_gemini_async(self, frame, mode="navigation", priority=3):
         t_start = time.time()
         telemetry.log("gemini_start", trigger=mode)
+        # Unikt filnamn för att undvika write-krockar om flera trådar startas
+        img_path = f"/tmp/gemini_capture_{uuid.uuid4().hex[:8]}.jpg"
         try:
-            # Använd unikt filnamn för att undvika write-krockar om flera trådar startas
-            img_path = f"/tmp/gemini_capture_{uuid.uuid4().hex[:8]}.jpg"
             small_frame = cv2.resize(frame, (1280, 720))
             cv2.imwrite(img_path, small_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
             
@@ -265,6 +265,11 @@ class VisionGlasses:
         finally:
             with self.gemini_lock:
                 self.is_gemini_processing = False
+            # Radera bilden: annars fylls /tmp (RAM) och bilder på personer ligger kvar
+            try:
+                os.remove(img_path)
+            except OSError:
+                pass
 
     def run(self):
         print("🚀 Vision-5 System startar (Säkerhets-, Trafik- och Intelligent OCR-läge)...")
@@ -316,7 +321,7 @@ class VisionGlasses:
                             if self.filter.evaluate_stair_drop(z_val):
                                 current_time = time.time()
                                 print("🚨 [BLINDKÄPP] Detekterade verifierad nivåskillnad/nedåtsteg!")
-                                self.audio.speak("Akut varning. Nivåskillnad nedåt.", priority=1, t_detect=t_detect)
+                                self.audio.speak("Trappa ner.", priority=1, t_detect=t_detect, key="trappa")
                                 self.filter.update_stair_pacing(current_time)
                             
                             # Automatisk Gemini-trigger (Cooldown höjd till 15 sek, skippar "analyserar"-spam)
@@ -345,13 +350,11 @@ class VisionGlasses:
                             
                             if should_notify:
                                 dist_str = f"{distance:.1f}".replace('.', ',')
-                                if is_emergency:
-                                    speech_text = f"Akut varning. {label} nära. {dist_str} meter."
-                                else:
-                                    speech_text = f"{label}. {dist_str} meter."
-                                
+                                # Korta fraser: varje ord i en akutvarning är latens
+                                speech_text = f"{label.capitalize()}. {dist_str} meter."
+
                                 # Skicka med sanna tiden in i ljudkön!
-                                self.audio.speak(speech_text, priority=priority, t_detect=t_detect)
+                                self.audio.speak(speech_text, priority=priority, t_detect=t_detect, key=label)
                     
                     time.sleep(0.01)
             except KeyboardInterrupt:
