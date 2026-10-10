@@ -6,7 +6,9 @@ och measure_phrases.py, och för att förgenerera cachen, så att allt matchar.
 # Hur avstånd uttalas. Mät varianterna med: python3 measure_phrases.py
 #   "decimal": "Bil. 0,6 meter."      "comma": "Bil, 0,6 meter."
 #   "half":    "Bil. En halv meter."  "nounit": "Bil, 0,6."
-DISTANCE_STYLE = "decimal"
+# Vald efter measure_phrases.py 2026-10-10: variant G ("Bil, 0,6 meter." + snabbare tal och
+# kort paus i tts_engine.py) gav 2,05 s mot 2,93 s för "Bil. 0,6 meter." och var lätt att förstå.
+DISTANCE_STYLE = "comma"
 
 _HALF_WORDS = {0.5: "en halv meter", 1.0: "en meter", 1.5: "en och en halv meter",
                2.0: "två meter", 2.5: "två och en halv meter", 3.0: "tre meter"}

@@ -19,10 +19,10 @@ PIPER_PATH = "./piper/piper"
 MODEL_PATH = "sv_SE-alma-medium.onnx"
 CACHE_DIR = "cache/tts"
 
-# Talhastighet: 1.0 = normal, lägre = snabbare (0.85 ≈ 15 % snabbare)
-LENGTH_SCALE = 1.0
+# Talhastighet: 1.0 = normal, lägre = snabbare (0.85 ≈ 15 % snabbare). Gäller även Gemini-svar.
+LENGTH_SCALE = 0.85
 # Tystnad efter varje mening (Piper-standard 0.2 s). "Bil. 0,6 meter." är två meningar.
-SENTENCE_SILENCE = 0.2
+SENTENCE_SILENCE = 0.05
 
 
 def wav_duration(path):
