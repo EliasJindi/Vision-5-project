@@ -21,10 +21,15 @@ class DetectionFilter:
     Hanterar spårning individuellt per objekttyp för att undvika dataläckage mellan klasser.
     Äger även den digitala blindkäppens logik för dämpning av trappvarningar.
     """
-    def __init__(self, cooldown_seconds=5.0, distance_threshold_meters=0.5, emergency_distance_meters=3.0):
+    def __init__(self, cooldown_seconds=5.0, distance_threshold_meters=0.5, emergency_distance_meters=3.0,
+                 emergency_repeat_seconds=4.0, emergency_closer_meters=0.3):
         self.cooldown = cooldown_seconds
         self.dist_threshold = distance_threshold_meters
         self.emergency_distance = emergency_distance_meters
+        # Ett akut objekt som står still upprepas bara efter så här lång tid,
+        # eller tidigare om det kommit så här mycket närmare.
+        self.emergency_repeat = emergency_repeat_seconds
+        self.emergency_closer = emergency_closer_meters
         
         # OOD-Struktur: Tillstånd spåras unikt per etikett (label) via ordböcker
         self.last_spoken_timestamps = {}
@@ -49,6 +54,19 @@ class DetectionFilter:
         self.rejection_counts = Counter()
         self.last_summary_time = time.time()
 
+    def is_emergency_candidate(self, label, distance):
+        """Är objektet ett akut hot (högprioriterad klass inom akutavstånd)?"""
+        if label in self.blacklist or label not in self.high_priority:
+            return False
+        if label == "person":
+            return distance <= 1.0
+        return distance <= self.emergency_distance
+
+    def mark_seen(self, label):
+        """Objektet syns men ska inte utvärderas nu (t.ex. ett akut objekt som inte är närmast)."""
+        self.last_seen_timestamps[label] = time.time()
+        self.rejection_counts[f"{label}:not_nearest"] += 1
+
     def evaluate_object(self, label, distance):
         """
         Utvärderar ett objekts status mot rådande säkerhetsregler (YOLO).
@@ -70,12 +88,10 @@ class DetectionFilter:
         
         self.last_seen_timestamps[label] = current_time
 
-        is_high_prio = label in self.high_priority
-        is_emergency_zone = (label == "person" and distance <= 1.0) or (label != "person" and distance <= self.emergency_distance)
-        
         # SÄKERHETSREGEL 1: AKUT VARNING (Nivå 1)
-        if is_high_prio and is_emergency_zone:
-            if was_away or dist_diff > 0.3 or (current_time - last_spoken > 1.5):
+        if self.is_emergency_candidate(label, distance):
+            came_closer = (last_distance - distance) > self.emergency_closer
+            if was_away or came_closer or (current_time - last_spoken > self.emergency_repeat):
                 self._update_object_state(label, distance, current_time)
                 return True, True, 1
             self.rejection_counts[f"{label}:emergency_cooldown"] += 1
@@ -243,6 +259,9 @@ class VisionGlasses:
         self.gemini_lock = threading.Lock()
         
         self.last_gemini_trigger_time = 0.0
+        # Antal bildrutor i rad där YOLO inte sett något. En enstaka tom bildruta
+        # (YOLO tappar objektet en ruta) får inte trigga Gemini.
+        self.empty_frames = 0
 
     def _call_gemini_async(self, frame, mode="navigation", priority=3):
         t_start = time.time()
@@ -288,6 +307,7 @@ class VisionGlasses:
                     t_detect = time.time() # <-- HÄR SKAPAS DEN SANNA TIDSSTÄMPELN
                     
                     detections = in_det.detections
+                    self.empty_frames = self.empty_frames + 1 if len(detections) == 0 else 0
                     in_video = q_video.tryGet()
                     in_spatial = q_spatial.tryGet()
                     
@@ -326,7 +346,7 @@ class VisionGlasses:
                             
                             # Automatisk Gemini-trigger (Cooldown höjd till 15 sek, skippar "analyserar"-spam)
                             with self.gemini_lock:
-                                if 0.2 < z_val < 1.4 and len(detections) == 0 and not self.is_gemini_processing:
+                                if 0.2 < z_val < 1.4 and self.empty_frames >= 10 and not self.is_gemini_processing:
                                     current_time = time.time()
                                     if current_time - self.last_gemini_trigger_time > 15.0 and in_video is not None:
                                         self.is_gemini_processing = True
@@ -341,21 +361,33 @@ class VisionGlasses:
                                         ).start()
 
                     # 3. REAL-TIDS YOLO-LOOP (Standardobjekt)
+                    objects = []
                     for det in detections:
-                        label = self.vision.label_map[det.label]
-                        distance = det.spatialCoordinates.z / 1000  
-                        
+                        distance = det.spatialCoordinates.z / 1000
                         if distance > 0.1:
-                            should_notify, is_emergency, priority = self.filter.evaluate_object(label, distance)
-                            
-                            if should_notify:
-                                dist_str = f"{distance:.1f}".replace('.', ',')
-                                # Korta fraser: varje ord i en akutvarning är latens
-                                speech_text = f"{label.capitalize()}. {dist_str} meter."
+                            objects.append((self.vision.label_map[det.label], distance))
 
-                                # Skicka med sanna tiden in i ljudkön!
-                                self.audio.speak(speech_text, priority=priority, t_detect=t_detect, key=label)
-                    
+                    # Bara det NÄRMASTE akuta objektet får larma i varje bildruta.
+                    # Flera samtidiga akutlarm hinner aldrig sägas och klipper bara varandra.
+                    emergencies = [o for o in objects if self.filter.is_emergency_candidate(*o)]
+                    nearest = min(emergencies, key=lambda o: o[1]) if emergencies else None
+
+                    for obj in objects:
+                        label, distance = obj
+                        if obj in emergencies and obj is not nearest:
+                            self.filter.mark_seen(label)
+                            continue
+
+                        should_notify, is_emergency, priority = self.filter.evaluate_object(label, distance)
+
+                        if should_notify:
+                            dist_str = f"{distance:.1f}".replace('.', ',')
+                            # Korta fraser: varje ord i en akutvarning är latens
+                            speech_text = f"{label.capitalize()}. {dist_str} meter."
+
+                            # Skicka med sanna tiden in i ljudkön!
+                            self.audio.speak(speech_text, priority=priority, t_detect=t_detect, key=label)
+
                     time.sleep(0.01)
             except KeyboardInterrupt:
                 print("\nStänger ner systemet på ett säkert sätt...")

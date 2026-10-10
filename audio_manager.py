@@ -56,7 +56,8 @@ class AudioManager:
         with self.lock:
             if priority == 1:
                 self._latest_emergency_seq[key] = seq
-                playing = self.piper_proc or self.pw_proc
+                # current_msg_id är None om ljudet redan klippts men workern inte hunnit städa
+                playing = (self.piper_proc or self.pw_proc) and self.current_msg_id is not None
                 played_for = time.time() - self.current_start_time
                 if playing and (self.current_priority > 1 or played_for >= MIN_EMERGENCY_PLAY_S):
                     print(f"[{time_str}] 🚨 [AudioQueue] AKUT VARNING! Klipper pågående ljud.")
@@ -71,6 +72,7 @@ class AudioManager:
         """Måste anropas med self.lock. Returnerar processerna som ska dödas."""
         if self.current_msg_id is not None:
             telemetry.log("speak_interrupted", id=self.current_msg_id, reason=reason)
+        self.current_msg_id = None  # Samma ljud ska inte kunna klippas (och loggas) två gånger
         procs = [p for p in (self.pw_proc, self.piper_proc) if p]
         return procs
 

@@ -62,7 +62,7 @@ def main():
     for p in sorted(by_prio):
         print(f"  nivå {p}: {by_prio[p]} ({by_prio[p] / minutes:.1f}/min)")
     print(f"Faktiskt uppspelade: {len(start)}")
-    print(f"Kastade (för gamla, TTL): {len(dropped)}")
+    print(f"Kastade: {len(dropped)} {dict(Counter(e.get('reason') for e in dropped))}  (ttl = för gammalt, superseded = nyare larm fanns)")
     print(f"Avbrutna av akut varning: {len(interrupted)}")
 
     spoken_time = sum(end[i]["t"] - start[i]["t"] for i in end if i in start)
@@ -110,6 +110,12 @@ def main():
         if temps:
             print(f"Temperatur: max {max(temps):.1f} C, snitt {sum(temps) / len(temps):.1f} C")
         print(f"Throttling-koder: {dict(thr)}  (0x0 = ren)")
+        volts = [e["voltage_v"] for e in v if e.get("voltage_v") is not None]
+        if volts:
+            print(f"Spänning EXT5V: min {min(volts):.3f} V, median {pct(volts, 50):.3f} V  (Pi:n varnar under ca 4,63 V)")
+        uv = [e["undervolt_now"] for e in v if e.get("undervolt_now") is not None]
+        if uv:
+            print(f"Underspänning just nu: {sum(uv)} av {len(uv)} prov ({100 * sum(uv) / len(uv):.0f}%)")
         qs = [e["audio_qsize"] for e in v if e.get("audio_qsize") is not None]
         if qs:
             print(f"Ljudköns längd: max {max(qs)}, snitt {sum(qs) / len(qs):.1f}")

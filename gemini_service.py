@@ -54,7 +54,8 @@ class GeminiService:
                 "Ge ett EXTREMT kort svar på svenska (MAX 10-12 ord). "
                 "Prioritera ENBART: trappor, nivåskillnader, dörröppningar eller akuta hinder i gångvägen. "
                 "TOTALFÖRBUD: Beskriv ALDRIG väggfärger, fönster, krukväxter, tavlor eller bakgrundsdekor. "
-                "Om gångvägen är helt fri, svara bara: 'Fri väg framåt.' "
+                "Om du inte ser något sådant hinder, svara exakt: INGET "
+                "(säg ALDRIG att vägen är fri, du ser inte allt). "
                 "VIKTIGT: Returnera ENBART ren text utan Markdown eller asterisker."
             )
         else:  # mode == "describe" (Klick på knappen)
@@ -77,7 +78,11 @@ class GeminiService:
                     print("⚠️ [GeminiService] Varning: Tomt svar eller blockerat av säkerhetsfilter.")
                     return "Svaret blockerades." if mode == "describe" else None
                 
-                return response.text.strip()
+                answer = response.text.strip()
+                # Navigationsläget ska vara tyst när inget hinder syns
+                if mode == "navigation" and answer.strip(" .").upper() == "INGET":
+                    return None
+                return answer
                 
         except ValueError as ve:
             print(f"🛡️ [GeminiService] Blockerat svar (Safety/Filter): {ve}")
