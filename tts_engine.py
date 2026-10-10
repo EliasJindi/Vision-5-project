@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import select
+import shutil
 import struct
 import subprocess
 import threading
@@ -21,6 +22,10 @@ CACHE_DIR = "cache/tts"
 
 # Talhastighet: 1.0 = normal, lägre = snabbare (0.85 ≈ 15 % snabbare). Gäller även Gemini-svar.
 LENGTH_SCALE = 0.85
+# Piper får bara använda dessa CPU-kärnor. Med alla fyra blir strömtopparna så höga
+# att Pi:n kan dö på powerbank. Kärna 0-1 lämnas åt kameraloopen.
+PIPER_CPUS = "2,3"
+
 # Tystnad efter varje mening (Piper-standard 0.2 s). "Bil. 0,6 meter." är två meningar.
 SENTENCE_SILENCE = 0.05
 
@@ -104,20 +109,13 @@ class TTSEngine:
         """Laddar röstmodellen direkt vid start i stället för vid första larmet."""
         self.synthesize("Start.", "/tmp/tts_warmup.wav", background=True)
 
-    def prewarm(self, phrases):
-        """Genererar fraser som saknas i cachen. Körs i bakgrunden vid start."""
-        made = 0
-        for text in phrases:
-            if not self.persistent_works:
-                break  # I reservläget kostar varje fras ~1 s: generera hellre vid behov
-            if wav_duration(self.cache_path(text)) is None:
-                if self.synthesize(text, self.cache_path(text), background=True):
-                    made += 1
-        return made
-
     # ---------- internt ----------
+    def missing(self, phrases):
+        return [t for t in phrases if wav_duration(self.cache_path(t)) is None]
+
     def _base_args(self):
-        return [PIPER_PATH, "--model", MODEL_PATH,
+        pin = ["taskset", "-c", PIPER_CPUS] if PIPER_CPUS and shutil.which("taskset") else []
+        return pin + [PIPER_PATH, "--model", MODEL_PATH,
                 "--length_scale", str(self.length_scale),
                 "--sentence_silence", str(self.sentence_silence)]
 
@@ -181,3 +179,24 @@ class TTSEngine:
             except Exception:
                 pass
         self._proc = None
+
+
+if __name__ == "__main__":
+    import sys
+    from phrases import common_phrases
+
+    if "--prewarm" not in sys.argv:
+        print("Användning: python3 tts_engine.py --prewarm   (kör UTAN att detect_spatial.py är igång)")
+        sys.exit(0)
+
+    engine = TTSEngine()
+    phrases = common_phrases()
+    todo = engine.missing(phrases)
+    print(f"{len(phrases) - len(todo)} av {len(phrases)} fraser finns redan. Genererar {len(todo)}...")
+    t0 = time.time()
+    for i, text in enumerate(todo, 1):
+        engine.synthesize(text, engine.cache_path(text), background=True)
+        if i % 20 == 0 or i == len(todo):
+            print(f"  {i}/{len(todo)}  ({time.time() - t0:.0f} s)")
+    left = engine.missing(phrases)
+    print("Klart." if not left else f"Klart, men {len(left)} misslyckades.")

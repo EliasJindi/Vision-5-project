@@ -39,13 +39,17 @@ class AudioManager:
         self.worker_thread.start()
 
     def prewarm(self, phrases):
-        """Ladda röstmodellen och generera vanliga fraser i bakgrunden vid start."""
+        """Ladda röstmodellen i bakgrunden och rapportera hur stor del av fraserna som är cachade."""
         def run():
             t0 = time.time()
             self.tts.warm_up()
-            made = self.tts.prewarm(phrases)
-            telemetry.log("tts_prewarm", phrases=len(phrases), generated=made, duration=time.time() - t0)
-            print(f"🗣️  [TTS] Klar: {len(phrases)} fraser i cache ({made} nya, {time.time() - t0:.1f} s)")
+            missing = self.tts.missing(phrases)
+            telemetry.log("tts_prewarm", phrases=len(phrases), missing=len(missing), duration=time.time() - t0)
+            print(f"🗣️  [TTS] Röstmodell laddad ({time.time() - t0:.1f} s). "
+                  f"{len(phrases) - len(missing)} av {len(phrases)} akutfraser i cache.")
+            if missing:
+                print("    Saknade fraser genereras när de behövs (~0,5 s första gången).")
+                print("    Generera alla i förväg, UTAN kameran igång: python3 tts_engine.py --prewarm")
         threading.Thread(target=run, daemon=True).start()
 
     def speak(self, text: str, priority: int = 3, msg_id=None, t_detect=None, key=None):

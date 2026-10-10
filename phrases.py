@@ -29,7 +29,11 @@ def format_phrase(label, distance, style=DISTANCE_STYLE):
     return f"{name}. {dec} meter."
 
 
-def common_phrases(labels):
+# Högprioriterade klasser (akutlarm). Används av DetectionFilter och för cachen.
+EMERGENCY_LABELS = ("person", "bil", "buss", "lastbil", "motorcykel", "cykel", "trafikljus", "stoppskylt")
+
+
+def common_phrases(labels=EMERGENCY_LABELS):
     """Alla akutfraser 0,1–3,0 m för givna labels. Genereras i förväg vid start."""
     phrases = {"Trappa ner."}
     for label in labels:

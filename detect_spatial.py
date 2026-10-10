@@ -14,7 +14,7 @@ from collections import Counter  # <-- För att räkna filterbeslut
 # Importera din fristående AI-modul enligt modularitetsprincipen
 from gemini_service import GeminiService
 
-from phrases import format_phrase, common_phrases
+from phrases import format_phrase, common_phrases, EMERGENCY_LABELS
 
 class DetectionFilter:
     """
@@ -50,7 +50,7 @@ class DetectionFilter:
         self.blacklist = {"flygplan", "paraply", "frisbee", "drake", "slips", "sportboll", "handväska"}
         
         # Högprioriterade trafikobjekt (Liv och död vid utomhusnavigering + person i närheten)
-        self.high_priority = {"person", "bil", "buss", "lastbil", "motorcykel", "cykel", "trafikljus", "stoppskylt"}
+        self.high_priority = set(EMERGENCY_LABELS)
 
         # TELEMETRI: Spårar varför saker blockeras
         self.rejection_counts = Counter()
@@ -298,8 +298,9 @@ class VisionGlasses:
         print("🚀 Vision-5 System startar (Säkerhets-, Trafik- och Intelligent OCR-läge)...")
         print("Systemet är live! Tryck på ENTER (eller din USB-knapp) när som helst.")
 
-        # Laddar röstmodellen och genererar akutfraserna i bakgrunden.
-        # Första körningen tar några minuter, sedan ligger de i cache/tts/.
+        # Laddar bara röstmodellen. Cachen genereras INTE här: 241 fraser samtidigt som
+        # kameran startar gav så hög last att Pi:n dog av strömbrist (2026-10-10).
+        # Generera cachen separat med: python3 tts_engine.py --prewarm
         audio_system.prewarm(common_phrases(self.filter.high_priority))
         
         with dai.Device(self.vision.get_pipeline()) as device:
