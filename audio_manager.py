@@ -2,76 +2,124 @@ import queue
 import threading
 import subprocess
 import time
+import itertools
+from telemetry_logger import telemetry  # <-- Telemetri importerad
 
 class AudioManager:
     def __init__(self):
-        # Skapa en trådsäker prioriteringskö
         self.queue = queue.PriorityQueue()
+        self._counter = itertools.count()
+        self.lock = threading.Lock()
         
-        # Håll koll på om en lägre prioriterad ljudfil spelas just nu
-        self.current_process = None
+        self.piper_proc = None
+        self.pw_proc = None
         self.current_priority = 99
+        self.current_msg_id = None  # <-- Håller koll på vad som spelas just nu
         
-        # Sökvägar till din lokala Piper-installation
         self.piper_path = "./piper/piper"
         self.model_path = "sv_SE-alma-medium.onnx"
         
-        # Starta bakgrundstråden som hanterar kön
         self.worker_thread = threading.Thread(target=self._audio_worker, daemon=True)
         self.worker_thread.start()
 
-    def speak(self, text: str, priority: int = 3):
-        """
-        Lägg till ett meddelande i kön.
-        Priority: 1 = Akut (hinder/personer), 2 = Navigering, 3 = OCR/Gemini (standard)
-        """
-        print(f"🔊 [AudioQueue] Lägger till nivå {priority}: '{text}'")
+    def speak(self, text: str, priority: int = 3, msg_id=None, t_detect=None):
+        if msg_id is None:
+            msg_id = telemetry.new_id()
+        if t_detect is None:
+            t_detect = time.time()
+            
+        time_str = time.strftime('%H:%M:%S')
+        print(f"[{time_str}] 🔊 [AudioQueue] Lägger till nivå {priority}: '{text}'")
         
-        # Om ett akut meddelande (Nivå 1) kommer in, och vi just nu spelar något med lägre prioritet (t.ex. Nivå 3)
-        if priority == 1 and self.current_priority > 1 and self.current_process:
-            print("🚨 [AudioQueue] AKUT VARNING! Klipper pågående lågprioriterat ljud.")
-            self.stop_current()
+        # LOGG: Meddelande skapat
+        telemetry.log("speak_enqueued", id=msg_id, priority=priority, text=text, t_detect=t_detect)
+        
+        with self.lock:
+            if priority == 1 and self.current_priority > 1 and (self.piper_proc or self.pw_proc):
+                print(f"[{time_str}] 🚨 [AudioQueue] AKUT VARNING! Klipper pågående ljud.")
+                self.stop_current()
 
-        # Lägg till i kön (PriorityQueue sorterar på första elementet i tuppeln)
-        self.queue.put((priority, text))
+        # Lägg in msg_id och t_detect i kön
+        self.queue.put((priority, next(self._counter), msg_id, t_detect, text))
 
     def stop_current(self):
-        """Tvingar Piper att tystna direkt om det körs."""
-        if self.current_process:
-            try:
-                self.current_process.terminate() # Dödar piper-processen direkt
-                self.current_process = None
-            except Exception as e:
-                print(f"Kunde inte stänga av ljudprocess: {e}")
+        # LOGG: Ljud avbröts av akut varning
+        if self.current_msg_id:
+            telemetry.log("speak_interrupted", id=self.current_msg_id)
+            
+        if self.pw_proc:
+            try: self.pw_proc.terminate()
+            except Exception: pass
+        if self.piper_proc:
+            try: self.piper_proc.terminate()
+            except Exception: pass
 
     def _audio_worker(self):
-        """Bakgrundstråd som plockar meddelanden ur kön ett efter ett."""
         while True:
             try:
-                # Hämta nästa meddelande från kön
-                priority, text = self.queue.get()
+                # Packa upp all data
+                priority, _, msg_id, t_detect, text = self.queue.get()
                 
-                self.current_priority = priority
+                # BÄST-FÖRE-SPÄRR (Nu mätt från exakt när kameran såg objektet!)
+                age = time.time() - t_detect
+                if priority > 1 and age > 4.0:
+                    print(f"[{time.strftime('%H:%M:%S')}] ⏳ [AudioQueue] Klipper inaktuellt ljud ({age:.1f}s gammalt): '{text}'")
+                    telemetry.log("speak_dropped", id=msg_id, reason="ttl", age=age)
+                    self.queue.task_done()
+                    continue
                 
-                # KORRIGERAT: Använder dina exakta sökvägar och pw-play för PipeWire
-                command = f"echo '{text}' | {self.piper_path} --model {self.model_path} --output_file - | pw-play -" 
+                with self.lock:
+                    self.current_priority = priority
+                    self.current_msg_id = msg_id
+                    
+                    # LOGG: Uppspelning börjar
+                    telemetry.log("speak_start", id=msg_id)
+                    
+                    self.piper_proc = subprocess.Popen(
+                        [self.piper_path, "--model", self.model_path, "--output_file", "-"],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL
+                    )
+                    
+                    self.pw_proc = subprocess.Popen(
+                        ["pw-play", "-"],
+                        stdin=self.piper_proc.stdout,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    
+                    self.piper_proc.stdout.close()
                 
-                # Starta uppläsningen
-                self.current_process = subprocess.Popen(command, shell=True)
+                try:
+                    self.piper_proc.stdin.write((text + "\n").encode('utf-8'))
+                    self.piper_proc.stdin.close()
+                except Exception:
+                    pass
                 
-                # Vänta tills Piper har pratat färdigt
-                self.current_process.wait()
+                try:
+                    self.pw_proc.wait(timeout=15)
+                    self.piper_proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    print("⚠️ [AudioQueue] Pw-play hängde sig. Tvingar avslutning.")
+                    with self.lock:
+                        self.stop_current()
                 
-                # Återställ status när ljudet är klart
-                self.current_process = None
-                self.current_priority = 99
+                # LOGG: Uppspelning klar
+                telemetry.log("speak_end", id=msg_id)
                 
-                # Markera uppgiften som klar i kön
+                with self.lock:
+                    self.piper_proc = None
+                    self.pw_proc = None
+                    self.current_priority = 99
+                    self.current_msg_id = None
+                
                 self.queue.task_done()
                 
             except Exception as e:
                 print(f"Fel i audio worker: {e}")
                 time.sleep(0.1)
 
-# Skapa en global instans som alla filer kan dela på
 audio_system = AudioManager()
+# Starta övervakning av värme och köstorlek
+telemetry.start_vitals(qsize_fn=audio_system.queue.qsize)

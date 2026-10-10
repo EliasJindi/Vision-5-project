@@ -1,0 +1,119 @@
+"""
+analyze_telemetry.py - Sammanfattar en loggsession.
+
+Användning:
+    python3 analyze_telemetry.py                      # senaste sessionen i logs/
+    python3 analyze_telemetry.py logs/session_X.jsonl
+"""
+import glob
+import json
+import os
+import sys
+from collections import Counter
+
+
+def pct(vals, p):
+    if not vals:
+        return None
+    s = sorted(vals)
+    return s[min(len(s) - 1, int(round(p / 100 * (len(s) - 1))))]
+
+
+def fmt(v, unit="ms"):
+    return "-" if v is None else f"{v * 1000:.0f} {unit}"
+
+
+def main():
+    path = sys.argv[1] if len(sys.argv) > 1 else max(
+        glob.glob("logs/session_*.jsonl"), key=os.path.getmtime
+    )
+    
+    # --- NY FIX FÖR STRÖMAVBROTT ---
+    ev = []
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            clean_line = line.strip().strip('\x00')
+            if clean_line:
+                try:
+                    ev.append(json.loads(clean_line))
+                except json.JSONDecodeError:
+                    pass  # Ignorera trasig rad om strömmen bröts
+    # -------------------------------
+
+    if not ev:
+        print("Tom logg.")
+        return
+
+    duration = ev[-1]["t"] - ev[0]["t"]
+    minutes = max(duration / 60, 1e-9)
+    print(f"Session: {path}")
+    print(f"Längd: {duration:.0f} s\n")
+
+    enq = {e["id"]: e for e in ev if e["event"] == "speak_enqueued"}
+    start = {e["id"]: e for e in ev if e["event"] == "speak_start"}
+    end = {e["id"]: e for e in ev if e["event"] == "speak_end"}
+    dropped = [e for e in ev if e["event"] == "speak_dropped"]
+    interrupted = [e for e in ev if e["event"] == "speak_interrupted"]
+
+    # --- Pratighet ---
+    by_prio = Counter(e["priority"] for e in enq.values())
+    print("== Pratighet ==")
+    print(f"Meddelanden insatta i kön: {len(enq)} ({len(enq) / minutes:.1f} per minut)")
+    for p in sorted(by_prio):
+        print(f"  nivå {p}: {by_prio[p]} ({by_prio[p] / minutes:.1f}/min)")
+    print(f"Faktiskt uppspelade: {len(start)}")
+    print(f"Kastade (för gamla, TTL): {len(dropped)}")
+    print(f"Avbrutna av akut varning: {len(interrupted)}")
+
+    spoken_time = sum(end[i]["t"] - start[i]["t"] for i in end if i in start)
+    print(f"Tid med tal: {spoken_time:.0f} s = {100 * spoken_time / max(duration, 1e-9):.0f}% av sessionen")
+    durs = [end[i]["t"] - start[i]["t"] for i in end if i in start]
+    print(f"Taltid per meddelande: median {fmt(pct(durs, 50))}, p95 {fmt(pct(durs, 95))}")
+
+    # --- Latens ---
+    lat = [start[i]["t"] - enq[i]["t_detect"] for i in start if i in enq]
+    wait = [start[i]["t"] - enq[i]["t"] for i in start if i in enq]
+    print("\n== Latens (detektion -> tal startar) ==")
+    print(f"Totalt:    median {fmt(pct(lat, 50))}, p95 {fmt(pct(lat, 95))}, max {fmt(max(lat) if lat else None)}")
+    print(f"Bara köad: median {fmt(pct(wait, 50))}, p95 {fmt(pct(wait, 95))}")
+    for p in sorted(by_prio):
+        lp = [start[i]["t"] - enq[i]["t_detect"] for i in start if i in enq and enq[i]["priority"] == p]
+        if lp:
+            print(f"  nivå {p}: median {fmt(pct(lp, 50))}, p95 {fmt(pct(lp, 95))} (n={len(lp)})")
+
+    # --- Filter ---
+    summ = Counter()
+    for e in ev:
+        if e["event"] == "filter_summary":
+            for k, v in e.get("counts", {}).items():
+                summ[k] += v
+    if summ:
+        print("\n== Filterbeslut (topp 10) ==")
+        for k, v in summ.most_common(10):
+            print(f"  {k}: {v}")
+
+    # --- Gemini ---
+    g = [e for e in ev if e["event"] == "gemini_end"]
+    if g:
+        durs_g = [e["duration"] for e in g]
+        ok = sum(1 for e in g if e.get("ok"))
+        print("\n== Gemini ==")
+        print(f"Anrop: {len(g)} ({len(g) / minutes:.1f}/min), lyckade: {ok}")
+        print(f"Svarstid: median {fmt(pct(durs_g, 50))}, p95 {fmt(pct(durs_g, 95))}, max {fmt(max(durs_g))}")
+
+    # --- Hårdvara ---
+    v = [e for e in ev if e["event"] == "vitals"]
+    if v:
+        temps = [e["temp_c"] for e in v if e.get("temp_c") is not None]
+        thr = Counter(e.get("throttled") for e in v)
+        print("\n== Hårdvara ==")
+        if temps:
+            print(f"Temperatur: max {max(temps):.1f} C, snitt {sum(temps) / len(temps):.1f} C")
+        print(f"Throttling-koder: {dict(thr)}  (0x0 = ren)")
+        qs = [e["audio_qsize"] for e in v if e.get("audio_qsize") is not None]
+        if qs:
+            print(f"Ljudköns längd: max {max(qs)}, snitt {sum(qs) / len(qs):.1f}")
+
+
+if __name__ == "__main__":
+    main()
