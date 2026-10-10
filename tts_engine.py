@@ -1,3 +1,8 @@
+# ===================== NY FIL AV CLAUDE (2026-10-10) =====================
+# Piper körs som EN process (--json-input) och färdiga fraser sparas i cache/tts/.
+# PIPER_CPUS begränsar Piper till 2 kärnor (Pi:n dog av strömbrist med alla 4).
+# Kör "python3 tts_engine.py --prewarm" för att generera akutfraserna i förväg.
+# =========================================================================
 """
 tts_engine.py - Piper som körs hela tiden + cache av färdiga ljudfiler.
 

@@ -1,3 +1,12 @@
+# ===================== ÄNDRINGAR AV CLAUDE (2026-10-10) =====================
+# - label_map: svenska tecken (båt, tåg, bärbar dator ...) så att Piper uttalar rätt.
+# - DetectionFilter: is_emergency_candidate()/mark_seen(); akutlarm upprepas efter 4 s
+#   eller om objektet kommit 0,3 m närmare (var 1,5 s). Död kod dörr/trappa borttagen.
+# - run(): bara det NÄRMASTE akuta objektet larmar per bildruta (28 -> 3 larm/10 s).
+# - run(): automatisk Gemini kräver 10 tomma bildrutor i rad (empty_frames).
+# - Fraser via phrases.format_phrase() ("Bil, 0,6 meter.", "Trappa ner.").
+# - _call_gemini_async(): temp-bilden raderas; gemini_end loggar ok/fel ärligt.
+# =============================================================================
 from audio_manager import audio_system
 from telemetry_logger import telemetry  # <-- Telemetri importerad
 import depthai as dai

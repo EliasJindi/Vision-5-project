@@ -1,3 +1,10 @@
+# ===================== ÄNDRINGAR AV CLAUDE (2026-10-10) =====================
+# - start_vitals(): intervall 1 s (var 5 s), loggar voltage_v och undervolt_now.
+# - _read_voltage(): läser EXT5V_V via "vcgencmd pmic_read_adc".
+# - _bit(): plockar bit 0 ur get_throttled = underspänning JUST NU.
+# - _writer(): os.fsync() var 2:a sekund så att loggen överlever strömavbrott
+#   (kraschloggen 18:18 blev annars 0 byte).
+# =============================================================================
 """
 telemetry_logger.py - Tyst telemetri för Vision-5.
 

@@ -1,3 +1,10 @@
+# ===================== ÄNDRINGAR AV CLAUDE (2026-10-10) =====================
+# - __init__(): timeout i HttpOptions (10 000 ms). Den gamla ThreadPoolExecutor-timeouten
+#   fungerade inte: with-blocket väntade ändå tills anropet var klart.
+# - Navigationsprompten: säger ALDRIG "Fri väg framåt", svarar INGET -> systemet är tyst.
+# - last_ok/last_error: så att telemetrin loggar fel ärligt (503 räknades som lyckat).
+# - 503/429 ger "Tjänsten är upptagen" i knappläget.
+# =============================================================================
 from google import genai
 from google.genai import types
 from PIL import Image

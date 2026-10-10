@@ -1,3 +1,15 @@
+# ===================== ÄNDRINGAR AV CLAUDE (2026-10-10) =====================
+# - TTL_PER_PRIORITY: nivå 1 = 2 s, nivå 2 = 8 s, nivå 3 = 4 s (var 4 s för allt > 1).
+# - MIN_EMERGENCY_PLAY_S + speak(): nivå 1 kan klippa nivå 1, men först efter 0,7 s,
+#   så att två larm inte hackar sönder varandra.
+# - speak(key=...) + _latest_emergency_seq: per label spelas bara det NYASTE akutlarmet.
+# - _detach_current()/_kill(): processer dödas utanför låset (kameraloopen fryser inte),
+#   terminate() och sedan kill(). Samma ljud kan inte loggas som klippt två gånger.
+# - _audio_worker(): spelar WAV-filer från tts_engine.py (cache) i stället för att starta
+#   Piper per meddelande. TTL kollas igen efter syntesen. Ett väntande akutlarm går före.
+# - prewarm(): laddar bara röstmodellen vid start (cachen görs med tts_engine.py --prewarm).
+# - Telemetri: nya händelser audio_start (när ljudet faktiskt börjar) och speak_error.
+# =============================================================================
 import queue
 import threading
 import subprocess

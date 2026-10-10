@@ -1,3 +1,7 @@
+# ===================== NY FIL AV CLAUDE (2026-10-10) =====================
+# Mätverktyg: jämför fraslängd för olika formuleringar/talhastigheter.
+# Påverkar inte systemet; körs separat.
+# =========================================================================
 """
 measure_phrases.py - Jämför hur långa akutfraserna blir i olika varianter.
 

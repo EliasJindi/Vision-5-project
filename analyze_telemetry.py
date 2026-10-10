@@ -1,3 +1,8 @@
+# ===================== ÄNDRINGAR AV CLAUDE (2026-10-10) =====================
+# - Latens mäts till audio_start (ljudet börjar) när det finns; äldre loggar varnas.
+# - Visar cacheträffar, syntestid, spänning, % underspänning, Gemini-fel och
+#   varför meddelanden kastades (ttl/superseded).
+# =============================================================================
 """
 analyze_telemetry.py - Sammanfattar en loggsession.
 

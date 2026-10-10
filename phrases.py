@@ -1,3 +1,7 @@
+# ===================== NY FIL AV CLAUDE (2026-10-10) =====================
+# All formulering av varningar på ett ställe. DISTANCE_STYLE = "comma" (variant G)
+# valdes efter measure_phrases.py. EMERGENCY_LABELS används av filtret och cachen.
+# =========================================================================
 """
 phrases.py - Exakt hur varningar formuleras. Används av detect_spatial.py
 och measure_phrases.py, och för att förgenerera cachen, så att allt matchar.
