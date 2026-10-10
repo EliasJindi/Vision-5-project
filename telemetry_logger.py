@@ -17,12 +17,15 @@ import time
 
 
 class TelemetryLogger:
-    def __init__(self, log_dir="logs", flush_interval=1.0):
+    def __init__(self, log_dir="logs", flush_interval=1.0, fsync_interval=2.0):
         os.makedirs(log_dir, exist_ok=True)
         self.path = os.path.join(log_dir, f"session_{time.strftime('%Y%m%d_%H%M%S')}.jsonl")
         self._q = queue.Queue(maxsize=10000)
         self._ids = itertools.count(1)
         self._flush_interval = flush_interval
+        # flush() lämnar bara datan till Linux; vid strömavbrott försvinner de senaste ~5 s.
+        # fsync() tvingar ut den till SD-kortet, så att vi ser vad som hände precis före en krasch.
+        self._fsync_interval = fsync_interval
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._writer, daemon=True)
         self._thread.start()
@@ -66,17 +69,26 @@ class TelemetryLogger:
     # ---------- internt ----------
     def _writer(self):
         with open(self.path, "a", encoding="utf-8") as f:
-            last_flush = time.time()
+            last_flush = last_fsync = time.time()
             while not self._stop.is_set() or not self._q.empty():
                 try:
                     rec = self._q.get(timeout=0.5)
                     f.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 except queue.Empty:
                     pass
-                if time.time() - last_flush >= self._flush_interval:
+                now = time.time()
+                if now - last_flush >= self._flush_interval:
                     f.flush()
-                    last_flush = time.time()
+                    last_flush = now
+                if now - last_fsync >= self._fsync_interval:
+                    f.flush()
+                    try:
+                        os.fsync(f.fileno())
+                    except OSError:
+                        pass
+                    last_fsync = now
             f.flush()
+            os.fsync(f.fileno())
 
     @staticmethod
     def _read_temp():
