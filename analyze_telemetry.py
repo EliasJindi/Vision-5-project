@@ -51,6 +51,11 @@ def main():
 
     enq = {e["id"]: e for e in ev if e["event"] == "speak_enqueued"}
     start = {e["id"]: e for e in ev if e["event"] == "speak_start"}
+    # audio_start = när ljudet faktiskt börjar spelas (finns från och med TTS-cachen).
+    # Äldre loggar saknar det: då används speak_start, som bara mäter kön.
+    audio = {e["id"]: e for e in ev if e["event"] == "audio_start"}
+    honest = bool(audio)
+    played = audio if honest else start
     end = {e["id"]: e for e in ev if e["event"] == "speak_end"}
     dropped = [e for e in ev if e["event"] == "speak_dropped"]
     interrupted = [e for e in ev if e["event"] == "speak_interrupted"]
@@ -61,25 +66,37 @@ def main():
     print(f"Meddelanden insatta i kön: {len(enq)} ({len(enq) / minutes:.1f} per minut)")
     for p in sorted(by_prio):
         print(f"  nivå {p}: {by_prio[p]} ({by_prio[p] / minutes:.1f}/min)")
-    print(f"Faktiskt uppspelade: {len(start)}")
+    print(f"Faktiskt uppspelade: {len(played)}")
     print(f"Kastade: {len(dropped)} {dict(Counter(e.get('reason') for e in dropped))}  (ttl = för gammalt, superseded = nyare larm fanns)")
     print(f"Avbrutna av akut varning: {len(interrupted)}")
 
-    spoken_time = sum(end[i]["t"] - start[i]["t"] for i in end if i in start)
+    spoken_time = sum(end[i]["t"] - played[i]["t"] for i in end if i in played)
     print(f"Tid med tal: {spoken_time:.0f} s = {100 * spoken_time / max(duration, 1e-9):.0f}% av sessionen")
-    durs = [end[i]["t"] - start[i]["t"] for i in end if i in start]
+    durs = [end[i]["t"] - played[i]["t"] for i in end if i in played]
     print(f"Taltid per meddelande: median {fmt(pct(durs, 50))}, p95 {fmt(pct(durs, 95))}")
 
     # --- Latens ---
-    lat = [start[i]["t"] - enq[i]["t_detect"] for i in start if i in enq]
+    lat = [played[i]["t"] - enq[i]["t_detect"] for i in played if i in enq]
     wait = [start[i]["t"] - enq[i]["t"] for i in start if i in enq]
-    print("\n== Latens (detektion -> tal startar) ==")
+    if honest:
+        print("\n== Latens (detektion -> ljudet börjar spelas) ==")
+    else:
+        print("\n== Latens (detektion -> Piper startar) ==")
+        print("  OBS: gammal logg utan audio_start. Röstmodellens laddtid (~0,85 s) ingår INTE.")
     print(f"Totalt:    median {fmt(pct(lat, 50))}, p95 {fmt(pct(lat, 95))}, max {fmt(max(lat) if lat else None)}")
     print(f"Bara köad: median {fmt(pct(wait, 50))}, p95 {fmt(pct(wait, 95))}")
     for p in sorted(by_prio):
-        lp = [start[i]["t"] - enq[i]["t_detect"] for i in start if i in enq and enq[i]["priority"] == p]
+        lp = [played[i]["t"] - enq[i]["t_detect"] for i in played if i in enq and enq[i]["priority"] == p]
         if lp:
             print(f"  nivå {p}: median {fmt(pct(lp, 50))}, p95 {fmt(pct(lp, 95))} (n={len(lp)})")
+
+    if honest:
+        hits = sum(1 for e in audio.values() if e.get("cache_hit"))
+        synth = [e["synth_s"] for e in audio.values() if not e.get("cache_hit") and "synth_s" in e]
+        print(f"Cacheträffar: {hits} av {len(audio)} ({100 * hits / len(audio):.0f}%)")
+        if synth:
+            print(f"Syntes vid cachemiss: median {fmt(pct(synth, 50))}, max {fmt(max(synth))}")
+        print("  OBS: pw-play behöver ytterligare ca 0,1–0,4 s innan ljudet hörs i headsetet.")
 
     # --- Filter ---
     summ = Counter()
@@ -99,6 +116,9 @@ def main():
         ok = sum(1 for e in g if e.get("ok"))
         print("\n== Gemini ==")
         print(f"Anrop: {len(g)} ({len(g) / minutes:.1f}/min), lyckade: {ok}")
+        errs = Counter(e.get("error") for e in g if not e.get("ok") and e.get("error"))
+        if errs:
+            print(f"Fel: {dict(errs)}")
         print(f"Svarstid: median {fmt(pct(durs_g, 50))}, p95 {fmt(pct(durs_g, 95))}, max {fmt(max(durs_g))}")
 
     # --- Hårdvara ---

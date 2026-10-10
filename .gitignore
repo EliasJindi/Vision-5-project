@@ -10,3 +10,4 @@ piper/
 .env
 logs/
 *.jpg
+cache/

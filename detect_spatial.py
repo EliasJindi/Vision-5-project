@@ -14,6 +14,8 @@ from collections import Counter  # <-- För att räkna filterbeslut
 # Importera din fristående AI-modul enligt modularitetsprincipen
 from gemini_service import GeminiService
 
+from phrases import format_phrase, common_phrases
+
 class DetectionFilter:
     """
     ANSVAR: Hanterar filtrering av oviktiga objekt (Blacklist) samt beräknar
@@ -273,10 +275,12 @@ class VisionGlasses:
             cv2.imwrite(img_path, small_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
             
             answer = self.ai_service.analyze_frame(img_path, mode=mode)
+            ok = self.ai_service.last_ok
             if answer:
                 self.audio.speak(answer, priority=priority)
             
-            telemetry.log("gemini_end", ok=True, duration=time.time() - t_start)
+            telemetry.log("gemini_end", ok=ok, error=self.ai_service.last_error,
+                          duration=time.time() - t_start)
                 
         except Exception as e:
             print(f"❌ Fel under asynkron Gemini-körning: {e}")
@@ -293,6 +297,10 @@ class VisionGlasses:
     def run(self):
         print("🚀 Vision-5 System startar (Säkerhets-, Trafik- och Intelligent OCR-läge)...")
         print("Systemet är live! Tryck på ENTER (eller din USB-knapp) när som helst.")
+
+        # Laddar röstmodellen och genererar akutfraserna i bakgrunden.
+        # Första körningen tar några minuter, sedan ligger de i cache/tts/.
+        audio_system.prewarm(common_phrases(self.filter.high_priority))
         
         with dai.Device(self.vision.get_pipeline()) as device:
             q_det = device.getOutputQueue(name="detections", maxSize=4, blocking=False)
@@ -381,9 +389,8 @@ class VisionGlasses:
                         should_notify, is_emergency, priority = self.filter.evaluate_object(label, distance)
 
                         if should_notify:
-                            dist_str = f"{distance:.1f}".replace('.', ',')
                             # Korta fraser: varje ord i en akutvarning är latens
-                            speech_text = f"{label.capitalize()}. {dist_str} meter."
+                            speech_text = format_phrase(label, distance)
 
                             # Skicka med sanna tiden in i ljudkön!
                             self.audio.speak(speech_text, priority=priority, t_detect=t_detect, key=label)

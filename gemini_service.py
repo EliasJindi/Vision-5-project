@@ -28,6 +28,10 @@ class GeminiService:
             self.client = None
             print("⚠️ VARNING: Miljövariabeln GEMINI_API_KEY hittades inte i gemini_service.py.")
 
+    # Status för senaste anropet, så att telemetrin kan logga misslyckanden ärligt
+    last_ok = False
+    last_error = None
+
     def _make_api_call(self, pil_img, prompt):
         """Hjälpmetod för att kunna lägga en timeout på nätverksanropet."""
         return self.client.models.generate_content(
@@ -42,8 +46,11 @@ class GeminiService:
         """
         # Returnera kortfattade fel om det är manuellt (describe), annars var tyst (navigation)
         error_response = "Systemfel. API-nyckel saknas." if mode == "describe" else None
-        
+        self.last_ok = False
+        self.last_error = None
+
         if not self.client:
+            self.last_error = "no_api_key"
             print("❌ [GeminiService] API-nyckeln saknas. Avbryter.")
             return error_response
 
@@ -76,22 +83,33 @@ class GeminiService:
                 # Säkerhetskontroll: Om filtren blockerade svaret eller nätverket returnerade tomt
                 if not response or not response.text:
                     print("⚠️ [GeminiService] Varning: Tomt svar eller blockerat av säkerhetsfilter.")
+                    self.last_error = "empty"
                     return "Svaret blockerades." if mode == "describe" else None
-                
+
+                self.last_ok = True
                 answer = response.text.strip()
                 # Navigationsläget ska vara tyst när inget hinder syns
                 if mode == "navigation" and answer.strip(" .").upper() == "INGET":
                     return None
                 return answer
-                
+
         except ValueError as ve:
             print(f"🛡️ [GeminiService] Blockerat svar (Safety/Filter): {ve}")
+            self.last_error = "blocked"
             return "Analysen blockerades av ett filter." if mode == "describe" else None
-            
+
         except Exception as e:
-            # Timeout (httpx.TimeoutException), inget nät, 429 rate limit m.m. hamnar här
-            if "timeout" in type(e).__name__.lower() or "timed out" in str(e).lower():
+            # Timeout (httpx.TimeoutException), inget nät, 503/429 från Google m.m. hamnar här
+            msg = str(e)
+            if "timeout" in type(e).__name__.lower() or "timed out" in msg.lower():
                 print("⏳ [GeminiService] Nätverkstimeout! Gemini tog för lång tid.")
+                self.last_error = "timeout"
                 return "Nätverksproblem, dålig täckning." if mode == "describe" else None
+            if msg.startswith(("503", "429")) or "UNAVAILABLE" in msg or "RESOURCE_EXHAUSTED" in msg:
+                # Nätet fungerar, men Googles tjänst är överbelastad eller vi har nått gränsen
+                print(f"🚦 [GeminiService] Tjänsten är upptagen: {msg[:80]}")
+                self.last_error = msg[:3]
+                return "Tjänsten är upptagen. Försök igen strax." if mode == "describe" else None
             print(f"❌ [GeminiService] Kritiskt nätverks- eller API-fel: {e}")
+            self.last_error = type(e).__name__
             return "Kunde inte nå nätverket." if mode == "describe" else None
