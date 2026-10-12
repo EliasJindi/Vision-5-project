@@ -7,3 +7,7 @@ __pycache__/
 *.onnx
 *.onnx.json
 piper/
+.env
+logs/
+*.jpg
+cache/
