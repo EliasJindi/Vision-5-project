@@ -13,6 +13,8 @@
 #  8. Färgbilden i 1080p så att koder kan läsas längre bort, där djupet fungerar
 #  9. Reservruta: om mitten saknar djup används hela streckkodens yta
 # 10. Diagnostik som visar VARFÖR djupet saknas
+# 11. --diag: sparar en bild varannan sekund + skriver ut ljus och skärpa
+#     (för att se varför koder inte läses, utan att flytta sig ur position)
 # Fristående: rör inga andra filer. Kör ALDRIG samtidigt som detect_spatial.py.
 # ===============================================================
 """
@@ -23,14 +25,17 @@ och räknar ut var användaren står: produktens position + avståndet från
 djupkameran, i riktningen som hyllans "facing" anger.
 
 Kräver:  pip install zxing-cpp numpy   (depthai finns redan i venv)
-Kör:     python3 barcode_scanner.py [kartor/produkter.geojson]
+Kör:     python3 barcode_scanner.py [kartor/produkter.geojson] [--diag]
+         --diag sparar logs/snapshots/*.jpg varannan sekund och visar ljus/skärpa
 """
+import argparse
 import json
 import os
 import sys
 import time
 from datetime import timedelta
 
+import cv2
 import depthai as dai
 import numpy as np
 import zxingcpp
@@ -42,6 +47,8 @@ COLOR_W, COLOR_H = 1920, 1080   # full upplösning: koder går att läsa längre
 DEPTH_W, DEPTH_H = 1280, 720     # djupbilden kan vara mindre, koordinaterna skalas om
 ROI_HALF_PX = 15            # djupet tas som median i en ruta på 31x31 px runt koden
 MIN_VALID_PX = 20           # minst så många giltiga djuppixlar för att lita på medianen
+DIAG_INTERVAL_S = 2.0      # --diag: en bild varannan sekund
+DIAG_MAX_IMAGES = 60       # --diag: sluta spara efter så många (skonar SD-kortet)
 BARCODE_FORMATS = (zxingcpp.BarcodeFormat.EAN13, zxingcpp.BarcodeFormat.UPCA)
 
 
@@ -219,8 +226,34 @@ def handle_barcode(res, color, depth, products, log, now):
     os.fsync(log.fileno())   # överlever strömavbrott
 
 
+def diagnose(color, results, n_saved, folder):
+    """Ljus och skärpa i bilden, och sparar en märkt bild. Returnerar en statusrad."""
+    gray = cv2.cvtColor(cv2.resize(color, (960, 540)), cv2.COLOR_BGR2GRAY)
+    brightness = float(gray.mean())                              # 0 = svart, 255 = vitt
+    sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())     # lågt = suddigt
+    status = (f"📷 ljus {brightness:3.0f}/255 ({'mörkt' if brightness < 60 else 'ok'})  "
+              f"skärpa {sharpness:5.0f} ({'suddigt' if sharpness < 50 else 'ok'})  "
+              f"koder: {[r.text for r in results] or 'inga'}")
+
+    if n_saved < DIAG_MAX_IMAGES:
+        img = color.copy()
+        for r in results:
+            pts = np.array([[c.x, c.y] for c in (r.position.top_left, r.position.top_right,
+                                                 r.position.bottom_right, r.position.bottom_left)], np.int32)
+            cv2.polylines(img, [pts], True, (0, 255, 0), 4)
+        cv2.putText(img, status.replace("📷 ", ""), (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
+        path = os.path.join(folder, f"snap_{n_saved + 1:03d}_{time.strftime('%H%M%S')}.jpg")
+        cv2.imwrite(path, img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        status += f"  → {path}"
+    return status
+
+
 def main():
-    map_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MAP
+    ap = argparse.ArgumentParser(description="Position från streckkoder (produkter som landmärken)")
+    ap.add_argument("karta", nargs="?", default=DEFAULT_MAP)
+    ap.add_argument("--diag", action="store_true", help="spara bilder och visa ljus/skärpa varannan sekund")
+    args = ap.parse_args()
+    map_path = args.karta
     products = load_products(map_path)
     n_places = sum(len(v) for v in products.values())
     print(f"Karta: {len(products)} streckkoder på {n_places} platser ({map_path})")
@@ -231,7 +264,12 @@ def main():
     with dai.Device(build_pipeline()) as device, open(log_path, "a", encoding="utf-8") as log:
         q = device.getOutputQueue(name="out", maxSize=4, blocking=False)
         print(f"Söker efter streckkoder (max ~{1 / SCAN_INTERVAL_S:.0f}/s). Loggar till {log_path}. Ctrl+C avslutar.")
-        last_scan = 0.0
+        last_scan = last_diag = 0.0
+        n_saved = 0
+        diag_dir = "logs/snapshots"
+        if args.diag:
+            os.makedirs(diag_dir, exist_ok=True)
+            print(f"Diagnostik PÅ: bild var {DIAG_INTERVAL_S:.0f}:e sekund till {diag_dir}/ (max {DIAG_MAX_IMAGES})")
         try:
             while True:
                 msg = q.get()
@@ -243,8 +281,14 @@ def main():
 
                 color = msg["color"].getCvFrame()
                 depth = msg["depth"].getFrame()   # uint16, millimeter
-                for res in zxingcpp.read_barcodes(color, formats=BARCODE_FORMATS):
+                results = zxingcpp.read_barcodes(color, formats=BARCODE_FORMATS)
+                for res in results:
                     handle_barcode(res, color, depth, products, log, now)
+
+                if args.diag and now - last_diag >= DIAG_INTERVAL_S:
+                    last_diag = now
+                    print(diagnose(color, results, n_saved, diag_dir))
+                    n_saved += 1
         except KeyboardInterrupt:
             print("\nAvslutar.")
 
