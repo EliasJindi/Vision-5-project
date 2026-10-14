@@ -8,6 +8,11 @@
 #     (flyttar man en punkt i QGIS uppdateras inte attributen)
 #  5. Avbryter med tydligt fel om kartan inte kan läsas
 #  6. setVideoSize(1280, 720) efter setIspScale, 15 fps, bara EAN-13/UPC-A
+# Runda 2 (efter första testet på Pi: koderna lästes men djupet saknades):
+#  7. Extended disparity: minsta mätbara avstånd ca halveras (OAK-D Lite ~35 cm -> ~20 cm)
+#  8. Färgbilden i 1080p så att koder kan läsas längre bort, där djupet fungerar
+#  9. Reservruta: om mitten saknar djup används hela streckkodens yta
+# 10. Diagnostik som visar VARFÖR djupet saknas
 # Fristående: rör inga andra filer. Kör ALDRIG samtidigt som detect_spatial.py.
 # ===============================================================
 """
@@ -33,9 +38,11 @@ import zxingcpp
 DEFAULT_MAP = "kartor/produkter.geojson"
 SCAN_INTERVAL_S = 0.33      # max ~3 avkodningar per sekund (strömbudget)
 CAMERA_FPS = 15
-FRAME_W, FRAME_H = 1280, 720
+COLOR_W, COLOR_H = 1920, 1080   # full upplösning: koder går att läsa längre bort
+DEPTH_W, DEPTH_H = 1280, 720     # djupbilden kan vara mindre, koordinaterna skalas om
 ROI_HALF_PX = 15            # djupet tas som median i en ruta på 31x31 px runt koden
-BARCODE_FORMATS = zxingcpp.BarcodeFormat.EAN13 | zxingcpp.BarcodeFormat.UPCA
+MIN_VALID_PX = 20           # minst så många giltiga djuppixlar för att lita på medianen
+BARCODE_FORMATS = (zxingcpp.BarcodeFormat.EAN13, zxingcpp.BarcodeFormat.UPCA)
 
 
 def normalize_ean(code):
@@ -99,8 +106,7 @@ def build_pipeline():
     cam = pipeline.create(dai.node.ColorCamera)
     cam.setBoardSocket(dai.CameraBoardSocket.CAM_A)
     cam.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
-    cam.setIspScale(2, 3)                   # 1920x1080 -> 1280x720 (skalar, beskär inte)
-    cam.setVideoSize(FRAME_W, FRAME_H)
+    cam.setVideoSize(COLOR_W, COLOR_H)
     cam.setInterleaved(False)
     cam.setFps(CAMERA_FPS)
 
@@ -113,8 +119,11 @@ def build_pipeline():
 
     stereo = pipeline.create(dai.node.StereoDepth)
     stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.DEFAULT)
+    # Streckkoder läses nära kameran. Utan detta saknas djup närmare än ca 35 cm.
+    stereo.setExtendedDisparity(True)
+    stereo.setSubpixel(False)          # krävs tillsammans med extended disparity
     stereo.setDepthAlign(dai.CameraBoardSocket.CAM_A)   # djup pixel för pixel mot färgbilden
-    stereo.setOutputSize(FRAME_W, FRAME_H)
+    stereo.setOutputSize(DEPTH_W, DEPTH_H)
     mono_l.out.link(stereo.left)
     mono_r.out.link(stereo.right)
 
@@ -130,19 +139,45 @@ def build_pipeline():
     return pipeline
 
 
+def _median_m(region):
+    valid = region[region > 0]
+    return (float(np.median(valid)) / 1000.0 if valid.size >= MIN_VALID_PX else None), int(valid.size)
+
+
 def depth_at(depth_frame, color_shape, corners):
-    """Median-djup (meter) runt streckkodens mittpunkt, eller None om djup saknas."""
-    cx = sum(c.x for c in corners) / 4
-    cy = sum(c.y for c in corners) / 4
-    # Skala om ifall färg- och djupbild inte är exakt lika stora
+    """
+    Median-djup (meter) vid streckkoden. Returnerar (avstånd eller None, förklaring).
+    Försöker först en liten ruta i mitten, sedan hela kodens yta (+50 % marginal).
+    """
     dh, dw = depth_frame.shape[:2]
     ch, cw = color_shape[:2]
-    cx, cy = int(cx * dw / cw), int(cy * dh / ch)
+    sx, sy = dw / cw, dh / ch            # färgbild -> djupbild
+    xs = [c.x * sx for c in corners]
+    ys = [c.y * sy for c in corners]
+    cx, cy = int(sum(xs) / 4), int(sum(ys) / 4)
 
-    roi = depth_frame[max(0, cy - ROI_HALF_PX):min(dh, cy + ROI_HALF_PX + 1),
-                      max(0, cx - ROI_HALF_PX):min(dw, cx + ROI_HALF_PX + 1)]
-    valid = roi[roi > 0]
-    return float(np.median(valid)) / 1000.0 if valid.size else None
+    d, n_center = _median_m(depth_frame[max(0, cy - ROI_HALF_PX):min(dh, cy + ROI_HALF_PX + 1),
+                                        max(0, cx - ROI_HALF_PX):min(dw, cx + ROI_HALF_PX + 1)])
+    if d is not None:
+        return d, "mitten"
+
+    # Reserv: hela streckkodens yta med marginal
+    mx = max(10, int((max(xs) - min(xs)) * 0.5))
+    my = max(10, int((max(ys) - min(ys)) * 0.5))
+    x0, x1 = max(0, int(min(xs)) - mx), min(dw, int(max(xs)) + mx + 1)
+    y0, y1 = max(0, int(min(ys)) - my), min(dh, int(max(ys)) + my + 1)
+    d, n_box = _median_m(depth_frame[y0:y1, x0:x1])
+    if d is not None:
+        return d, "kodens yta"
+
+    # Diagnostik: saknas djup bara här, eller i hela bilden?
+    whole = float(np.count_nonzero(depth_frame)) / depth_frame.size
+    if whole < 0.05:
+        why = f"nästan inget djup i hela bilden ({whole:.0%}), kameran ser troligen för nära eller för mörkt"
+    else:
+        why = (f"djup finns i {whole:.0%} av bilden men inte vid koden "
+               f"({n_center}+{n_box} giltiga px). För nära (<~20 cm) eller blank yta?")
+    return None, why
 
 
 def handle_barcode(res, color, depth, products, log, now):
@@ -150,9 +185,12 @@ def handle_barcode(res, color, depth, products, log, now):
     if not ean:
         return
     p = res.position
-    d = depth_at(depth, color.shape, (p.top_left, p.top_right, p.bottom_right, p.bottom_left))
+    d, how = depth_at(depth, color.shape, (p.top_left, p.top_right, p.bottom_right, p.bottom_left))
     if d is None:
-        print(f"[{ean}] Hittad, men inget djup (för nära/för långt bort?)")
+        print(f"[{ean}] Hittad, men inget djup: {how}")
+        log.write(json.dumps({"t": round(now, 3), "ean": ean, "distance_m": None, "why": how},
+                             ensure_ascii=False) + "\n")
+        log.flush()
         return
 
     if ean not in products:
@@ -161,7 +199,7 @@ def handle_barcode(res, color, depth, products, log, now):
 
     cands = products[ean]
     positions = []
-    print(f"\n--- {cands[0]['namn']} ({ean}), {d:.2f} m bort ---")
+    print(f"\n--- {cands[0]['namn']} ({ean}), {d:.2f} m bort (djup från {how}) ---")
     for c in cands:
         pos = user_position(c, d)
         if pos is None:
