@@ -15,6 +15,8 @@
 # 10. Diagnostik som visar VARFÖR djupet saknas
 # 11. --diag: sparar en bild varannan sekund + skriver ut ljus och skärpa
 #     (för att se varför koder inte läses, utan att flytta sig ur position)
+# 12. --4k: färgbilden i 3840x2160 (dubbelt så många pixlar per streck) med
+#     5 fps och 2 avkodningar/s. Kräver USB3, varnar annars.
 # Fristående: rör inga andra filer. Kör ALDRIG samtidigt som detect_spatial.py.
 # ===============================================================
 """
@@ -25,8 +27,9 @@ och räknar ut var användaren står: produktens position + avståndet från
 djupkameran, i riktningen som hyllans "facing" anger.
 
 Kräver:  pip install zxing-cpp numpy   (depthai finns redan i venv)
-Kör:     python3 barcode_scanner.py [kartor/produkter.geojson] [--diag]
+Kör:     python3 barcode_scanner.py [kartor/produkter.geojson] [--diag] [--4k]
          --diag sparar logs/snapshots/*.jpg varannan sekund och visar ljus/skärpa
+         --4k   läser i 3840x2160 (längre läsavstånd, mer CPU/USB)
 """
 import argparse
 import json
@@ -44,6 +47,11 @@ DEFAULT_MAP = "kartor/produkter.geojson"
 SCAN_INTERVAL_S = 0.33      # max ~3 avkodningar per sekund (strömbudget)
 CAMERA_FPS = 15
 COLOR_W, COLOR_H = 1920, 1080   # full upplösning: koder går att läsa längre bort
+# --4k: dubbelt så många pixlar per streck. 4K-video kräver mycket USB-bandbredd,
+# därför lägre fps, och avkodningen av en 4K-bild tar längre tid -> färre per sekund.
+UHD_W, UHD_H = 3840, 2160
+UHD_FPS = 5
+UHD_SCAN_INTERVAL_S = 0.5
 DEPTH_W, DEPTH_H = 1280, 720     # djupbilden kan vara mindre, koordinaterna skalas om
 ROI_HALF_PX = 15            # djupet tas som median i en ruta på 31x31 px runt koden
 MIN_VALID_PX = 20           # minst så många giltiga djuppixlar för att lita på medianen
@@ -107,22 +115,27 @@ def user_position(cand, d):
     return None
 
 
-def build_pipeline():
+def build_pipeline(uhd=False):
     pipeline = dai.Pipeline()
+    fps = UHD_FPS if uhd else CAMERA_FPS
 
     cam = pipeline.create(dai.node.ColorCamera)
     cam.setBoardSocket(dai.CameraBoardSocket.CAM_A)
-    cam.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
-    cam.setVideoSize(COLOR_W, COLOR_H)
+    if uhd:
+        cam.setResolution(dai.ColorCameraProperties.SensorResolution.THE_4_K)
+        cam.setVideoSize(UHD_W, UHD_H)
+    else:
+        cam.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
+        cam.setVideoSize(COLOR_W, COLOR_H)
     cam.setInterleaved(False)
-    cam.setFps(CAMERA_FPS)
+    cam.setFps(fps)
 
     mono_l = pipeline.create(dai.node.MonoCamera)
     mono_r = pipeline.create(dai.node.MonoCamera)
     for mono, socket in ((mono_l, dai.CameraBoardSocket.CAM_B), (mono_r, dai.CameraBoardSocket.CAM_C)):
         mono.setBoardSocket(socket)
         mono.setResolution(dai.MonoCameraProperties.SensorResolution.THE_480_P)
-        mono.setFps(CAMERA_FPS)
+        mono.setFps(fps)
 
     stereo = pipeline.create(dai.node.StereoDepth)
     stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.DEFAULT)
@@ -241,7 +254,9 @@ def diagnose(color, results, n_saved, folder):
             pts = np.array([[c.x, c.y] for c in (r.position.top_left, r.position.top_right,
                                                  r.position.bottom_right, r.position.bottom_left)], np.int32)
             cv2.polylines(img, [pts], True, (0, 255, 0), 4)
-        cv2.putText(img, status.replace("📷 ", ""), (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
+        # OpenCV kan inte rita å/ä/ö
+        ascii_status = status.replace("📷 ", "").translate(str.maketrans("åäöÅÄÖ", "aaoAAO"))
+        cv2.putText(img, ascii_status, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
         path = os.path.join(folder, f"snap_{n_saved + 1:03d}_{time.strftime('%H%M%S')}.jpg")
         cv2.imwrite(path, img, [cv2.IMWRITE_JPEG_QUALITY, 85])
         status += f"  → {path}"
@@ -252,6 +267,7 @@ def main():
     ap = argparse.ArgumentParser(description="Position från streckkoder (produkter som landmärken)")
     ap.add_argument("karta", nargs="?", default=DEFAULT_MAP)
     ap.add_argument("--diag", action="store_true", help="spara bilder och visa ljus/skärpa varannan sekund")
+    ap.add_argument("--4k", dest="uhd", action="store_true", help="läs i 3840x2160 (längre läsavstånd)")
     args = ap.parse_args()
     map_path = args.karta
     products = load_products(map_path)
@@ -261,9 +277,14 @@ def main():
     os.makedirs("logs", exist_ok=True)
     log_path = f"logs/scan_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
 
-    with dai.Device(build_pipeline()) as device, open(log_path, "a", encoding="utf-8") as log:
+    scan_interval = UHD_SCAN_INTERVAL_S if args.uhd else SCAN_INTERVAL_S
+    with dai.Device(build_pipeline(uhd=args.uhd)) as device, open(log_path, "a", encoding="utf-8") as log:
+        usb = device.getUsbSpeed()
+        print(f"Kamera: {'4K 3840x2160 @ ' + str(UHD_FPS) if args.uhd else '1080p @ ' + str(CAMERA_FPS)} fps, USB {usb.name}")
+        if args.uhd and usb not in (dai.UsbSpeed.SUPER, dai.UsbSpeed.SUPER_PLUS):
+            print("⚠️  4K kräver USB3 (blå port). Med USB2 kan bilden hacka eller utebli.")
         q = device.getOutputQueue(name="out", maxSize=4, blocking=False)
-        print(f"Söker efter streckkoder (max ~{1 / SCAN_INTERVAL_S:.0f}/s). Loggar till {log_path}. Ctrl+C avslutar.")
+        print(f"Söker efter streckkoder (max ~{1 / scan_interval:.0f}/s). Loggar till {log_path}. Ctrl+C avslutar.")
         last_scan = last_diag = 0.0
         n_saved = 0
         diag_dir = "logs/snapshots"
@@ -275,7 +296,7 @@ def main():
                 msg = q.get()
                 now = time.time()
                 # Begränsa ALLA avkodningar, även när ingen kod syns (CPU = ström)
-                if now - last_scan < SCAN_INTERVAL_S:
+                if now - last_scan < scan_interval:
                     continue
                 last_scan = now
 
