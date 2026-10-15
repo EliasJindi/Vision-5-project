@@ -35,6 +35,10 @@
 # 15. --facit EAN: anger rätt streckkod i testet. Varje läsning loggas som rätt/fel,
 #     felläsningar skrivs ut som FELLÄSNING, och vid Ctrl+C visas en sammanfattning.
 # 16. Läget (4k eller 1080p) står i loggfilens namn och i varje rad.
+# 17. Räknar försök: antal avkodade bildrutor efter 10 s uppvärmning (autofokus och exponering
+#     ställer in sig), hur många som hade en kod och hur många som hade RÄTT kod (--facit).
+#     Visas vid Ctrl+C, så att träffprocent per avstånd går att räkna utan stoppur.
+#     Bara i sammanfattningen i terminalen, inte i loggen.
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående: rör inga andra filer. Kör ALDRIG samtidigt som detect_spatial.py.
@@ -67,6 +71,7 @@ import numpy as np
 import zxingcpp
 
 DEFAULT_MAP = "kartor/produkter.geojson"
+WARMUP_S = 10               # försök räknas först efter detta (autofokus och exponering ställer in sig)
 SCAN_INTERVAL_S = 0.33      # max ~3 avkodningar per sekund (strömbudget)
 CAMERA_FPS = 15
 COLOR_W, COLOR_H = 1920, 1080   # full upplösning: koder går att läsa längre bort
@@ -319,6 +324,12 @@ def median_min(values):
 
 def print_summary(mode, facit, stats, log_path):
     print(f"\nSammanfattning ({mode}): {stats['reads']} avläsningar. Logg: {log_path}")
+    tries = stats["tries"]
+    if tries:
+        line = f"  Försök efter {WARMUP_S} s uppvärmning: {tries} bildrutor, {stats['hit_frames']} med kod ({stats['hit_frames'] / tries:.0%})"
+        if facit:
+            line += f", {stats['right_frames']} med rätt kod ({stats['right_frames'] / tries:.0%})"
+        print(line)
     if facit:
         print(f"  Facit {facit}: {stats['right']} rätt, {stats['wrong']} fel")
         print(f"  px/modul, rätta: {median_min(stats['px_right'])}")
@@ -370,7 +381,8 @@ def main():
     mode = "4k" if args.uhd else "1080p"
     os.makedirs("logs", exist_ok=True)
     log_path = f"logs/scan_{time.strftime('%Y%m%d_%H%M%S')}_{mode}.jsonl"
-    stats = {"reads": 0, "right": 0, "wrong": 0, "px_right": [], "px_wrong": []}
+    stats = {"reads": 0, "right": 0, "wrong": 0, "px_right": [], "px_wrong": [],
+             "tries": 0, "hit_frames": 0, "right_frames": 0}
     if facit:
         print(f"Facit: {facit}. Felläsningar markeras.")
 
@@ -383,6 +395,7 @@ def main():
         q = device.getOutputQueue(name="out", maxSize=4, blocking=False)
         print(f"Söker efter streckkoder (max ~{1 / scan_interval:.0f}/s). Loggar till {log_path}. Ctrl+C avslutar.")
         last_scan = last_diag = 0.0
+        started = time.time()
         n_saved = 0
         diag_dir = "logs/snapshots"
         if args.diag:
@@ -402,6 +415,10 @@ def main():
                 results = zxingcpp.read_barcodes(color, formats=BARCODE_FORMATS)
                 for res in results:
                     handle_barcode(res, color, depth, products, log, now, mode, facit, stats)
+                if now - started >= WARMUP_S:
+                    stats["tries"] += 1
+                    stats["hit_frames"] += bool(results)
+                    stats["right_frames"] += bool(facit and any(normalize_ean(r.text) == facit for r in results))
 
                 if args.diag and now - last_diag >= DIAG_INTERVAL_S:
                     last_diag = now
