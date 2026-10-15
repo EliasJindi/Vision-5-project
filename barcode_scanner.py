@@ -17,6 +17,26 @@
 #     (för att se varför koder inte läses, utan att flytta sig ur position)
 # 12. --4k: färgbilden i 3840x2160 (dubbelt så många pixlar per streck) med
 #     5 fps och 2 avkodningar/s. Kräver USB3, varnar annars.
+# Runda 3 (2026-10-15, efter dagsljustestet): loggningen var för tunn. Felläsningar
+# syntes bara i terminalen, och 4K/1080p sparades inte, så det fick gissas i efterhand.
+# 13. Loggar ALLA avläsningar: även okända varor, utan djup och ogiltiga koder.
+#     Nya fält per rad: mode, raw, ean, in_map, w_px, px_per_modul, rot_deg,
+#     hornen, bild, depth_how (och facit/correct om --facit används)
+# 14. px per modul (pixlar per grundstreck) mäts från kodens hörnpunkter LÄNGS läsriktningen
+#     (top_left -> top_right), inte som bredden i x-led. Rak och 90° roterad kod ger rätt
+#     värde (testat med syntetiska koder med känd modulstorlek).
+#     BEGRÄNSNINGAR (testade, syntetiska bilder):
+#     - Vid andra vinklar än 0/90/180/270 mäter zxing längs en rak skanrad, så px_per_modul
+#       blir för högt med 1/cos(vinkeln): +3,5 % vid 15°. Alltså optimistiskt.
+#     - För streckkoder ger zxing en RAKT rektangel även när koden lutar åt sidan
+#       (vänster och höger kant lika höga). Lutning går därför INTE att läsa ur hörnen.
+#       Den måste mätas ur djupet (vänster mot höger sida). Inte gjort än.
+#     - Antar att positionen omfattar de 95 modulerna. Kontrollera mot en riktig körning.
+# 15. --facit EAN: anger rätt streckkod i testet. Varje läsning loggas som rätt/fel,
+#     felläsningar skrivs ut som FELLÄSNING, och vid Ctrl+C visas en sammanfattning.
+# 16. Läget (4k eller 1080p) står i loggfilens namn och i varje rad.
+# Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
+# per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående: rör inga andra filer. Kör ALDRIG samtidigt som detect_spatial.py.
 # ===============================================================
 """
@@ -27,12 +47,15 @@ och räknar ut var användaren står: produktens position + avståndet från
 djupkameran, i riktningen som hyllans "facing" anger.
 
 Kräver:  pip install zxing-cpp numpy   (depthai finns redan i venv)
-Kör:     python3 barcode_scanner.py [kartor/produkter.geojson] [--diag] [--4k]
-         --diag sparar logs/snapshots/*.jpg varannan sekund och visar ljus/skärpa
-         --4k   läser i 3840x2160 (längre läsavstånd, mer CPU/USB)
+Kör:     python3 barcode_scanner.py [kartor/produkter.geojson] [--diag] [--4k] [--facit EAN]
+         --diag   sparar logs/snapshots/*.jpg varannan sekund och visar ljus/skärpa
+         --4k     läser i 3840x2160 (längre läsavstånd, mer CPU/USB)
+         --facit  rätt streckkod i testet, t.ex. 7340083497834: markerar felläsningar
+Logg:    logs/scan_<datum>_<tid>_<4k|1080p>.jsonl (en rad per avläsning)
 """
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -58,6 +81,7 @@ MIN_VALID_PX = 20           # minst så många giltiga djuppixlar för att lita 
 DIAG_INTERVAL_S = 2.0      # --diag: en bild varannan sekund
 DIAG_MAX_IMAGES = 60       # --diag: sluta spara efter så många (skonar SD-kortet)
 BARCODE_FORMATS = (zxingcpp.BarcodeFormat.EAN13, zxingcpp.BarcodeFormat.UPCA)
+MODULES = 95                # EAN-13 och UPC-A: 95 moduler (grundstreck) mellan första och sista strecket
 
 
 def normalize_ean(code):
@@ -200,26 +224,77 @@ def depth_at(depth_frame, color_shape, corners):
     return None, why
 
 
-def handle_barcode(res, color, depth, products, log, now):
+def code_geometry(position, frame_shape):
+    """
+    Kodens mått i bilden, mätta längs läsriktningen (hörnpunkterna), inte i x-led.
+    px_per_modul = pixlar per grundstreck. rot_deg är bara pålitlig för 0/90/180/270 grader.
+    Lutning åt sidan syns INTE här: zxing ger en rak rektangel för streckkoder.
+    """
+    tl, tr, br, bl = ((c.x, c.y) for c in (position.top_left, position.top_right,
+                                           position.bottom_right, position.bottom_left))
+
+    def dist(a, b):
+        return math.hypot(a[0] - b[0], a[1] - b[1])
+
+    width = (dist(tl, tr) + dist(bl, br)) / 2
+    return {
+        "w_px": round(width, 1),
+        "px_per_modul": round(width / MODULES, 2),
+        "rot_deg": round(math.degrees(math.atan2(tr[1] - tl[1], tr[0] - tl[0])), 1),
+        "hornen": [[round(x), round(y)] for x, y in (tl, tr, br, bl)],
+        "bild": [frame_shape[1], frame_shape[0]],
+    }
+
+
+def write_log(log, rec):
+    log.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    log.flush()
+    os.fsync(log.fileno())   # överlever strömavbrott
+
+
+def handle_barcode(res, color, depth, products, log, now, mode="1080p", facit=None, stats=None):
+    """Loggar ALLA avläsningar (även okända och felaktiga), skriver ut de som har ett användbart svar."""
     ean = normalize_ean(res.text)
+    geo = code_geometry(res.position, color.shape)
+    rec = {"t": round(now, 3), "mode": mode, "raw": res.text, "ean": ean,
+           "format": str(res.format), **geo}
+    tag = ""
+    if facit:
+        rec["facit"] = facit
+        rec["correct"] = ean == facit
+        if not rec["correct"]:
+            tag = f"  ❌ FELLÄSNING (facit {facit})"
+    if stats is not None:
+        stats["reads"] += 1
+        if facit:
+            stats["right" if rec["correct"] else "wrong"] += 1
+            stats["px_right" if rec["correct"] else "px_wrong"].append(geo["px_per_modul"])
+
     if not ean:
-        return
-    p = res.position
-    d, how = depth_at(depth, color.shape, (p.top_left, p.top_right, p.bottom_right, p.bottom_left))
-    if d is None:
-        print(f"[{ean}] Hittad, men inget djup: {how}")
-        log.write(json.dumps({"t": round(now, 3), "ean": ean, "distance_m": None, "why": how},
-                             ensure_ascii=False) + "\n")
-        log.flush()
+        rec.update(in_map=False, distance_m=None, depth_how="ogiltig streckkod")
+        write_log(log, rec)
         return
 
+    d, how = depth_at(depth, color.shape, (res.position.top_left, res.position.top_right,
+                                           res.position.bottom_right, res.position.bottom_left))
+    rec["in_map"] = ean in products
+    rec["depth_how"] = how
+    px = f"{geo['px_per_modul']:.1f} px/modul"
+    if d is None:
+        rec["distance_m"] = None
+        print(f"[{ean}] Hittad, men inget djup, {px}: {how}{tag}")
+        write_log(log, rec)
+        return
+    rec["distance_m"] = round(d, 3)
+
     if ean not in products:
-        print(f"\n[OKÄND VARA] {ean}, {d:.2f} m bort (finns inte i kartan)")
+        print(f"\n[OKÄND VARA] {ean}, {d:.2f} m bort, {px} (finns inte i kartan){tag}")
+        write_log(log, rec)
         return
 
     cands = products[ean]
     positions = []
-    print(f"\n--- {cands[0]['namn']} ({ean}), {d:.2f} m bort (djup från {how}) ---")
+    print(f"\n--- {cands[0]['namn']} ({ean}), {d:.2f} m bort (djup från {how}), {px}{tag} ---")
     for c in cands:
         pos = user_position(c, d)
         if pos is None:
@@ -231,12 +306,23 @@ def handle_barcode(res, color, depth, products, log, now):
     if ambiguous:
         print(f"   ⚠️  Tvetydigt: varan finns på {len(positions)} platser")
 
-    log.write(json.dumps({
-        "t": round(now, 3), "ean": ean, "namn": cands[0]["namn"], "format": str(res.format),
-        "distance_m": round(d, 3), "candidates": positions, "ambiguous": ambiguous,
-    }, ensure_ascii=False) + "\n")
-    log.flush()
-    os.fsync(log.fileno())   # överlever strömavbrott
+    rec.update(namn=cands[0]["namn"], candidates=positions, ambiguous=ambiguous)
+    write_log(log, rec)
+
+
+def median_min(values):
+    if not values:
+        return "–"
+    v = sorted(values)
+    return f"median {v[len(v) // 2]:.2f}, min {v[0]:.2f}, max {v[-1]:.2f}"
+
+
+def print_summary(mode, facit, stats, log_path):
+    print(f"\nSammanfattning ({mode}): {stats['reads']} avläsningar. Logg: {log_path}")
+    if facit:
+        print(f"  Facit {facit}: {stats['right']} rätt, {stats['wrong']} fel")
+        print(f"  px/modul, rätta: {median_min(stats['px_right'])}")
+        print(f"  px/modul, fel:   {median_min(stats['px_wrong'])}")
 
 
 def diagnose(color, results, n_saved, folder):
@@ -268,14 +354,25 @@ def main():
     ap.add_argument("karta", nargs="?", default=DEFAULT_MAP)
     ap.add_argument("--diag", action="store_true", help="spara bilder och visa ljus/skärpa varannan sekund")
     ap.add_argument("--4k", dest="uhd", action="store_true", help="läs i 3840x2160 (längre läsavstånd)")
+    ap.add_argument("--facit", metavar="EAN",
+                    help="rätt streckkod i testet: loggar varje läsning som rätt/fel och märker felläsningar")
     args = ap.parse_args()
+    facit = None
+    if args.facit:
+        facit = normalize_ean(args.facit)
+        if not facit:
+            sys.exit(f"❌ --facit {args.facit!r} är ingen giltig EAN-13/UPC-A (fel längd eller kontrollsiffra)")
     map_path = args.karta
     products = load_products(map_path)
     n_places = sum(len(v) for v in products.values())
     print(f"Karta: {len(products)} streckkoder på {n_places} platser ({map_path})")
 
+    mode = "4k" if args.uhd else "1080p"
     os.makedirs("logs", exist_ok=True)
-    log_path = f"logs/scan_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
+    log_path = f"logs/scan_{time.strftime('%Y%m%d_%H%M%S')}_{mode}.jsonl"
+    stats = {"reads": 0, "right": 0, "wrong": 0, "px_right": [], "px_wrong": []}
+    if facit:
+        print(f"Facit: {facit}. Felläsningar markeras.")
 
     scan_interval = UHD_SCAN_INTERVAL_S if args.uhd else SCAN_INTERVAL_S
     with dai.Device(build_pipeline(uhd=args.uhd)) as device, open(log_path, "a", encoding="utf-8") as log:
@@ -304,7 +401,7 @@ def main():
                 depth = msg["depth"].getFrame()   # uint16, millimeter
                 results = zxingcpp.read_barcodes(color, formats=BARCODE_FORMATS)
                 for res in results:
-                    handle_barcode(res, color, depth, products, log, now)
+                    handle_barcode(res, color, depth, products, log, now, mode, facit, stats)
 
                 if args.diag and now - last_diag >= DIAG_INTERVAL_S:
                     last_diag = now
@@ -312,6 +409,7 @@ def main():
                     n_saved += 1
         except KeyboardInterrupt:
             print("\nAvslutar.")
+        print_summary(mode, facit, stats, log_path)
 
 
 if __name__ == "__main__":
