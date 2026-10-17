@@ -1,6 +1,6 @@
 # HANDOFF: Vision-5 (till nästa agent)
 
-Skriven 2026-10-17 av föregående agent. Läs hela filen innan du gör något. Den beskriver vad projektet är, vad som är gjort, hur säkra vi är på varje resultat, vad som är på gång och **varför**. Filen innehåller medvetet inga rumsmått, koordinater, foton eller personnamn: repot är publikt.
+Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätserien (avsnitt 3, 4, 6, 7 och 10). Läs hela filen innan du gör något. Den beskriver vad projektet är, vad som är gjort, hur säkra vi är på varje resultat, vad som är på gång och **varför**. Filen innehåller medvetet inga rumsmått, koordinater, foton eller personnamn: repot är publikt.
 
 ---
 
@@ -16,6 +16,8 @@ Skriven 2026-10-17 av föregående agent. Läs hela filen innan du gör något. 
   - Att presentera beräknade siffror som mätta. Markera alltid: *uppmätt / beräknat / hypotes*.
   - Att ge råd som skapar ett nytt fel (jag föreslog att höja kameran med saker under, och det lutade uppställningen och förstörde flera körningar). Elias hittade felet själv.
   - Att påstå att något "bevisats" på tunt underlag.
+  - Att tolka brus som mönster: under mätserien 17/10 drogs tre egna tolkningar tillbaka (se avsnitt 4). Dra inga slutsatser av en enstaka körning, och skriv uttryckligen *uppmätt / tolkning / hypotes*.
+  - Att tro att en inklistrad utskrift är den nya körningen. Elias klistrar ibland in den gamla. **Kontrollera loggnamnet (tiden) på raden `Loggar till logs/scan_…`** och be om den nya vid behov.
 - **Elias tar emot kodgranskning av andras kod** (ofta skriven av en annan AI-agent). Elias har gett tillåtelse att ändra kod om du tycker den är dålig, så länge du säger vad du ändrat och förklarar felet.
 - **Måttband i tum.** Elias mäter i tum. Räkna om (tum × 2,54 = cm) i alla instruktioner.
 
@@ -95,14 +97,15 @@ Mycket gick åt till att göra systemet stabilt och snabbt.
 **QGIS-fällor:** sök bara på "3006" (ett tankstreck i "EPSG:3006 – SWEREF99 TM" bröt sökningen). Avbocka "Detektera fälttyper" vid CSV-import så att inledande nollor i EAN behålls. Exportera GeoJSON med RFC7946=NO så att koordinaterna stannar i EPSG:3006.
 
 ### `barcode_scanner.py`
-Startade som ett utkast från en annan AI-agent. Granskad och rättad. Filhuvudet har numrerade ändringar 1–17. I korthet:
+Startade som ett utkast från en annan AI-agent. Granskad och rättad. Filhuvudet har numrerade ändringar 1–19. I korthet:
 - Rättade krascher (`time.timedelta`, `msg.get` på en MessageGroup) och en begränsning av skanningstakten som bara gällde efter en träff (30 avkodningar/s = strömproblem).
 - **Extended disparity** så att djup finns ner till ~0,20 m (annars ~0,35 m). **Reservruta** för djup runt kodens yta.
 - `--diag`: sparar en bild varannan sekund i `logs/snapshots/` (max 60) med ljus- och skärpevärde, och grön ram runt funna koder.
 - `--4k`: 3840×2160 @ 5 fps (1080p @ 15 fps är standard). Varnar om USB inte är USB3.
 - **Ändring 13–17 (2026-10-15, PR #6 och #7):** alla avläsningar loggas (även okända och felläsningar); `--facit EAN` märker varje läsning rätt/fel och skriver `FELLÄSNING`; pixlar per modul (`px_per_modul`) mäts från kodens hörn; läget (`4k`/`1080p`) står i loggfilens namn; försöksräknare (träffprocent efter 10 s uppvärmning) i sammanfattningen vid Ctrl+C.
+- **Ändring 18–19 (2026-10-17, PR #9):** linsposition (`lins`, 0–255), exponeringstid (`exp_us`) och ISO loggas per läsning och visas i `--diag`-raden; sammanfattningen jämför linsposition för alla bildrutor med de som hade rätt kod; **`--fokus N`** låser linsen manuellt (autofokus av). **Inte körd mot riktig kamera.** Skalan 0–255 är kamerans egen, inte centimeter.
 
-**Loggformat** (`logs/scan_<datum>_<tid>_<4k|1080p>.jsonl`, en rad per avläsning, `fsync`): `t`, `mode`, `raw`, `ean`, `format`, `w_px`, `px_per_modul`, `rot_deg`, `hornen`, `bild`, `in_map`, `depth_how`, `distance_m`, och om `--facit`: `facit`, `correct`; för varor i kartan även `namn`, `candidates` (positioner), `ambiguous`. Bara avkodade koder loggas. Bildrutor utan kod ger ingen rad.
+**Loggformat** (`logs/scan_<datum>_<tid>_<4k|1080p>.jsonl`, en rad per avläsning, `fsync`): `t`, `mode`, `raw`, `ean`, `format`, `w_px`, `px_per_modul`, `rot_deg`, `hornen`, `bild`, `lins`, `exp_us`, `iso`, `in_map`, `depth_how`, `distance_m`, och om `--facit`: `facit`, `correct`; för varor i kartan även `namn`, `candidates` (positioner), `ambiguous`. Bara avkodade koder loggas. Bildrutor utan kod ger ingen rad.
 
 Skannern är **fristående**. Kör den aldrig samtidigt som `detect_spatial.py`, och den varnar inte för hinder eller människor.
 
@@ -110,44 +113,67 @@ Skannern är **fristående**. Kör den aldrig samtidigt som `detect_spatial.py`,
 
 ## 4. Mätresultat och hur säkra de är
 
-Tomatpuré (kod 33 mm), köket i dagsljus, powerbank, kameran rakt på bordet. Avstånd enligt kamerans djup.
+Tomatpuré (kod 33 mm, ~0,35 mm per modul), köket i dagsljus, powerbank. Avstånd enligt kamerans djup. **Mätserie 2026-10-17 med `--facit`** (en PDF med alla 19 körningar gjordes för Elias, men ligger inte i repot). Siffror per körning: andel bildrutor med rätt kod efter 10 s uppvärmning.
 
-| | 4K | 1080p |
-|---|---|---|
-| Stabilt | 0,38 m och 0,53 m (varje bild) | 0,21–0,22 m (62 läsningar) |
-| Gräns | **0,62 m: ibland** (6 läsningar på ~1 min, ~10 %) | **~0,25 m: ibland rätt, ibland felläsning** |
-| Inte alls | 0,81 m | ~0,25 m med dålig vinkel (10 tum) |
+### 4K (3840×2160)
+| Djup | px/modul (uppmätt) | Rätt kod | Felläsningar | Kommentar |
+|---|---|---|---|---|
+| 0,50 m | 2,0 | 70 % | 8 av 79 | Rakt stöd |
+| 0,54 m | 1,87 | 68 % | 0 av 64 | |
+| 0,54–0,55 m | 1,86 | **77 %** | 0 av 17 | Bok som stöd, plant |
+| 0,55 m | 1,84 | **2 %** | 0 | Samma avstånd som raden ovan, paketet verkade vridet |
+| 0,57 m | 1,80 | 1 % | 0 | |
+| 0,59 m | 1,75 | 1 % | 0 | Läsningar bara efter att paketet rörts |
+| 0,60 m | 1,7 | 0 % | 1 av 1 | |
+| 0,63 m | 1,63 | 1 % | 0 | |
 
-Linserna (14 oktober, kvällsljus ~55–75/255): 1080p 0,20 m, 4K stabilt ~0,35 m och ibland 0,45–0,50 m (mindre kod).
+Första körningarna (12:47 och 12:52) hade koden långt ner i bilden respektive en instabil hög under paketet: 2 % och 1 % (3 av 4 läsningar fel).
 
-**Säkerhetsklass för varje påstående**
+### 1080p
+| Djup | px/modul | Rätt kod | Felläsningar | Kommentar |
+|---|---|---|---|---|
+| 0,21 m | 2,4–2,5 | 20 % | 2 av 19 | Läsningar bara under ~10 s efter en knuff, sedan inget (fokus landar fel) |
+| 0,23 m | 2,22 | 0 % | 0 | Skärpa ~600, en läsning under fokussökning |
+| 0,25 m | 2,05 | 12 % | 6 av 16 | Svart bok hållen bakom |
+| 0,25–0,26 m | 1,95–2,05 | **0 %** | **30 av 30** | Svart bok stående bakom, läsningar efter knuff, alla fel |
+| 0,28 m | 1,82 | 0 % | 1 av 1 | |
 
+Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m, ibland 0,62 m. 1080p 0,21–0,22 m stabilt (62 läsningar), ~0,25 m med blandade rätt och fel.
+
+### Säkerhetsklass för varje påstående
 | Påstående | Status |
 |---|---|
-| Läsavstånden ovan | **Uppmätta** (loggar bekräftar) |
-| 4K ≈ 2,4× längre läsavstånd än 1080p för samma kod | **Uppmätt**, litet underlag |
-| Pixlar per modul vid gränsen (4K ~1,6–1,8, 1080p ~1,95–2,1) | **Beräknade** ur teorin (69° bildvinkel, 0,35 mm), **inte** mätta. Antar samma bildvinkel i båda lägena |
-| "4K gav inga felläsningar" | Gäller bara de 6 av 11 4K-körningar där utskriften granskades. Felläsningar loggades inte då |
-| "1080p felläser för att bilden skalas ner" | **Hypotes** |
-| Måttband mot djup skiljer ~2 cm | **Ryms i måttbandets avrundning** (tum/halvtum, ±1,3 cm). Inget säkert offset |
-| Säkerhetsregel "säg gå närmare under 2,5 px/modul" | **Inte testad.** Hade enligt de beräknade siffrorna blockerat 4K-läsningar som fungerade. Tröskeln måste mätas per läge |
+| Läsavstånden i tabellerna | **Uppmätta**, men nära gränsen är de **inte repeterbara** (samma avstånd gav 2 %, 68 % och 77 %) |
+| px/modul är mätt (inte beräknad) och stämmer med teorin (2,0 / 1,87 / 1,63 i 4K, 2,22 i 1080p) | **Uppmätt** |
+| 4K-gräns ≈ 1,85 px/modul, 1080p-gräns ≈ 2,2 px/modul | **Uppmätt tendens**, få körningar per nivå. Att 1080p kräver fler pixlar kan bero på nedskalning: **hypotes** |
+| px/modul skiljer **inte** rätt från fel läsning (2,03 mot 2,02) | **Uppmätt** (samma kod, samma avstånd) |
+| Felläsningar är **reproducerbara** (samma felaktiga koder dag efter dag, i båda lägena) | **Uppmätt** |
+| Röstning över några sekunder hade fångat felen i 4K (71 rätt mot 8 fel) men inte i 1080p (30 av 30 fel) | **Uppmätt**, men bara en körning per fall |
+| Läsningar kommer i bursts efter att paketet rörts, och fokus landar ofta fel nära | **Tolkning**, stöd i ~8 körningar. Skärpevärdet i `--diag` mäts över hela bilden och går inte att jämföra mellan uppställningar |
+| Vinkel/vridning av paketet är den största okända variabeln | **Tolkning**, passar alla körningar men är inte mätt |
+| Kodens position i bilden förklarar skillnaderna | **Stöds inte** (mellan 10 och 16 % under mitten avgör läget inget, bara längst ner var det dåligt) |
+| Måttband mot djup: ~2 cm offset | **Ej visat.** Skillnaden växlade +0,7 till +3,1 cm utan mönster och ryms i hur kameran ställdes mot måttbandet. Använd djupet som avstånd |
+
+### Tre tolkningar som drogs tillbaka under dagen (upprepa dem inte)
+1. "4K är pålitligt upp till 0,54 m": gäller bara med rak uppställning.
+2. "Träffarna följer skärpan" (ur fem körningar): motbevisades av en körning med skärpa ~1 250 och 77 % träffar.
+3. "Gränsen är 1,8–1,85 px/modul i båda lägena": 1080p kräver ~2,2.
 
 ### Viktiga fynd
-1. **Stabila felläsningar.** På ~0,25 m i 1080p lästes tomatpurén som `6038721300844` ~20 gånger i rad. Rätt kod var `7340083497834`. Den gröna ramen satt på rätt kod, så felet ligger i avkodningen, inte i att fel sak hittades. Felkoderna hade **giltig kontrollsiffra** (som fångar ett enstaka fel, inte flera samtidigt). Bilden står stilla, så felet blir detsamma varje gång. **"Kräv 2–3 likadana läsningar" räcker därför inte.** Det som skyddade var att koden inte fanns i kartan.
-2. **Vinkeln spelar lika stor roll som avståndet** nära gränsen. Kameran höjdes med saker under och lutade uppställningen: 0 läsningar i flera körningar.
-3. **Motljus:** med fönstret i bild exponerar kameran efter fönstret. Ljusvärdet i `--diag` är ett **medelvärde över hela bilden** och säger inget om själva koden (det visade 85 när koden var för mörk).
-4. **Autofokus** behöver ~10 s, luras av starka lampor och kan fastna. Ett kritiskt läge var nära håll (~0,2 m). Skärpevärdet i `--diag` är mest pålitligt som mätare.
-5. **Att sikta** är ett verkligt problem (utan sökare hamnade koden i bild 1 av 14 gånger). En blind användare har samma problem.
-6. **Nära gränsen är läsningen mycket känslig** för avstånd, vinkel och var i bilden koden sitter. Räkna med god marginal: ~0,5 m för den här koden i 4K, inte 0,62 m.
-7. **Strömmen på powerbank höll** under dagsljustestet: `throttled=0x0`, ~4,83 V i vila och 4,90–4,95 V under körning.
+1. **Stabila felläsningar.** Tomatpurén (`7340083497834`) läses fel som samma fåtal koder: `6038721300844`, `4340413497834`, `7320023497834`, `7340023497832`, m.fl. Felkoderna har giltig kontrollsiffra. Exempel: `7320023497834` har två siffror fel (4→2 och 8→2) vars effekter på kontrollsumman tar ut varandra (−2 och −18, summan −20). **"Kräv 2–3 likadana läsningar" räcker därför inte**, och i 1080p på 0,25 m var den felaktiga koden i majoritet. Det som skyddar är kontroll mot en produktlista, en pixelgräns per läge och röstning tillsammans.
+2. **Uppställningen avgör nära gränsen.** Plant stöd, paketet rakt mot kameran, inget lutande eller vridet, ingen instabil hög. Vinklar har inte mätts (använd mobilens vattenpass).
+3. **Motljus och ljusmedelvärdet:** `--diag` visar ett medelvärde över hela bilden som kan visa 85 när koden är för mörk.
+4. **Autofokus** behöver ~10 s, kan landa på bakgrunden och går inte att lita på på nära håll (~0,2 m). Det är därför `--fokus` och linspositionsloggen lades in.
+5. **Att sikta** är ett verkligt problem för en blind användare. Det är designkrav.
+6. **Strömmen på powerbank höll** hela dagen: `throttled=0x0`, 4,83 V i vila och 4,90–4,96 V under körning.
 
 ### Begränsningar upptäckta i `barcode_scanner.py` (testat med syntetiska koder)
 - `px_per_modul` är rätt för rak och 90° roterad kod. Vid andra vinklar mäter zxing längs en rak skanrad, så värdet blir för högt med 1/cos(vinkeln) (+3,5 % vid 15°).
-- **zxing ger en rak rektangel för streckkoder även när koden lutar åt sidan.** Lutning (perspektiv) går alltså **inte** att läsa ur hörnpunkterna. Ett första försök (`persp`) gav alltid 1,0 och togs bort. Lutning måste mätas ur **djupet** (vänster mot höger sida), vilket inte är gjort.
-- Antagandet att zxings position omfattar de 95 modulerna är bara kontrollerat på syntetiska bilder.
-- `--facit` räknar **allt** som inte är facit som felläsning, även en riktig annan streckkod som råkar vara i bild (t.ex. ett cornflakespaket i bakgrunden).
-- Positionsberäkningen ignorerar **sidoavvikelse**: den antar att användaren står rakt framför varan. Sitter koden i bildens kant blir felet upp till ~20 cm på 0,35 m. Troligen större än djupfelet.
-- Stereodjupet är stabilt (samma värde på millimetern) men hoppar i steg som växer med avståndet i kvadrat. **Repeterbarhet är inte riktighet.**
+- **zxing ger en rak rektangel för streckkoder även när koden lutar åt sidan.** Lutning (perspektiv) går inte att läsa ur hörnpunkterna och måste mätas ur **djupet** (vänster mot höger sida). Inte gjort.
+- `--facit` räknar **allt** som inte är facit som felläsning, även en riktig annan streckkod som råkar vara i bild (ha bara testobjektet i bild).
+- Positionsberäkningen ignorerar **sidoavvikelse**: den antar att användaren står rakt framför varan. Upp till ~20 cm fel på 0,35 m om koden sitter i bildens kant.
+- Stereodjupet är stabilt men hoppar i steg som växer med avståndet i kvadrat (uppskattningsvis ~1 cm per steg vid 0,6 m). Repeterbarhet är inte riktighet.
+- Bara avkodade koder loggas. Bildrutor utan kod ger ingen rad; träffprocent räknas i terminalens sammanfattning (inte i loggen).
 
 ---
 
@@ -159,24 +185,16 @@ Linserna (14 oktober, kvällsljus ~55–75/255): 1080p 0,20 m, 4K stabilt ~0,35 
 
 ---
 
-## 6. Vad som väntar just nu: dagsljustestet med `--facit`
+## 6. Läget just nu och vad som väntar på Pi:n
 
-**Läge vid skrivandet:** Elias fick en komplett testplan (steg 0–9) men har **inte** återkommit med resultat. Jag vet inte om testet är kört, eller om Pi:n är uppdaterad. Fråga först. Pi:n ska stå på `main` (`git log -1` ska visa merge-commiten för PR #7, `ffd01a9`).
+**Mätserien 17/10 är klar** (19 körningar, `--facit`, 4K och 1080p, se avsnitt 4). Elias har `main` till och med PR #8; **PR #9 (linsposition och `--fokus`) har Elias inte kört än**. Pi:n ska vara på commit `7309af4` eller senare (`git pull && sync`).
 
-**Varför testet:** vi har bara beräknade pixlar per modul och inga felläsningar loggade för 5 av 11 körningar. Vi behöver mätt data för att kunna bestämma en säker tröskel för "gå närmare" (och för att veta om det går att skilja rätt från fel alls).
+**Nästa test (ännu inte gjort):** fokus.
+- **Steg A: se var autofokus landar.** `python3 barcode_scanner.py --diag --facit 7340083497834` (1080p, ~8 tum, och 4K på ~0,55 m). `--diag`-raden visar nu `lins N`. Notera vilken linsposition som står när fokus har landat och inget läses, och vilken som står när koden läses (efter en knuff). Sammanfattningen visar median/spann för alla bildrutor och för bildrutor med rätt kod.
+- **Steg B: lås linsen.** `… --fokus <N>` med N från steg A, prova ±10. Läser den stabilt utan knuff är fokus begränsningen.
+- Ett rent test av bakgrundshypotesen (en enfärgad bakgrund bakom paketet, ingen rörelse, ingen knuff) gav 17/10 inget stabilt resultat, men andra bakgrunder än den bok vi använde (mycket kontrast på omslaget) är inte prövade.
 
-**Testplanen (kort)** (full version gavs till Elias i chatten):
-0. `cd ~/ai_glasses && git pull && sync && source venv/bin/activate`, kontrollera commit.
-1. `vcgencmd get_throttled; vcgencmd pmic_read_adc EXT5V_V` som utgångsvärde.
-2. Köket i dagsljus, fönstret bakom kameran, **bara tomatpurén i bild**, kameran rakt, koden mitt i bilden.
-3. Kontrollkörning 4K på 15 tum: `python3 barcode_scanner.py --diag --4k --facit 7340083497834; vcgencmd get_throttled; vcgencmd pmic_read_adc EXT5V_V`. Kontrollera att `px/modul` ligger runt **2,6**.
-4. 4K-serie: 19, 20, 21, 22, 23, 24, 25 tum, 60 s per steg efter 10 s fokus. Sluta vid två noll i rad.
-5. 1080p-serie (utan `--4k`): 7, 8, 9, 10, 11 tum.
-6. Jämför måttband (tum × 2,54) mot utskrivet djup.
-7. Sammanställning av alla loggar (ett kort Python-skript som skriver ut läsningar, median/min px per modul för rätta och fel).
-8. `sync`. 9. Skicka allt hit.
-
-**Förväntade värden (beräknade, 0,35 mm per modul, 69° bildvinkel):** 4K på 0,38 m ≈ 2,6 px/modul; 4K på 0,53 m ≈ 1,85; 1080p på 0,22 m ≈ 2,2. Avviker de mer än ~15 % är antingen bildvinkeln fel eller zxings hörnpunkter inte där vi tror. Det är i så fall ett resultat i sig, eftersom kamerans verkliga pixelskala då kan räknas ut ur datan.
+**Test i uppställning att använda:** köket i dagsljus, fönstret bakom kameran, **bara testobjektet i bild**, kameran plant, paketet rakt upp på ett stabilt stöd med rak framsida mot kameran, **tejpmarkerad bas för paketet och kamerans fötter** så att uppställningen kan upprepas. Mät vinkeln med mobilens vattenpass. Skriv ner varje ändring (en sak i taget). Mät avstånd med djupet, inte måttbandet.
 
 ---
 
@@ -184,18 +202,16 @@ Linserna (14 oktober, kvällsljus ~55–75/255): 1080p 0,20 m, 4K stabilt ~0,35 
 
 I ordning:
 
-1. **Analysera Elias testdata** (när den kommer). *Varför:* gör beräknade siffror till mätta.
-   - Jämför `px_per_modul` mot de förväntade värdena ovan. Räkna ut verklig pixelskala per läge.
-   - Bygg en tabell per läge och avstånd: försök, träffprocent, rätt/fel, px/modul för rätta och fel.
-   - **Bestäm tröskeln per läge**, om fördelningarna för rätt och fel går att skilja. Om de överlappar: säg det ärligt och föreslå alternativ (t.ex. dubbelkoll mot butikens produktlista, läsning ur lite olika bilder, Gemini som dubbelkoll vid osäkerhet).
-   - **Validera tröskeln på andra körningar** än de den togs fram på. Annars är den inte testad.
-   - Uppdatera arbetsloggen (PDF) och rätta de punkter som markerats som beräknade.
-2. **Kontrollera djupet mot måttband** (0,3 / 0,5 / 1,0 / 1,5 m). *Varför:* stereofelet växer med avståndet i kvadrat. Den observerade 2 cm-skillnaden går inte att tolka eftersom måttbandet avrundades. Obs: djupet skrivs bara ut när en kod läses, så avstånd bortom läsgränsen kräver en större testkod.
-3. **Positionstestet.** Lägg om tejpkorsen (de gamla låg 0,6–1,0 m från varan, för långt för att läsa koden) på ~0,35 m och kör 4K. *Varför:* mäter hela kedjan karta → kod → position. Räkna med att sidoavvikelse är största felkällan.
-4. **Röstvägledning för siktet** (Elias vill fundera extra på den, och tycker den är en bra funktion). Se nedan. *Varför:* löser sikteproblemet, som är designkrav för blinda användare.
-5. **Knappskanning** (USB-knapp via `evdev`, systemd): kameran sitter på pannband och följer huvudet. Skanna några sekunder vid tryck. *Varför:* mindre ström, inga oönskade avläsningar, passar att användaren "tittar" på varan.
-6. **Gemini som reserv** när ingen kod syns eller den är osäker (produktigenkänning, "koden sitter på baksidan, vänd paketet"). *Varför:* skalar till hundratals produkter utan att träna egna modeller.
-7. **Hyllkantsetiketter**, **integration** med `detect_spatial.py` (en kamera, säkerhetslarmen först, position på nivå 3 i ljudkön), eventuell **AI-agent** med verktyg (`ta_bild`, `läs_streckkod`, `slå_upp_i_kartan`, `säg`; aldrig säkerhet), sist en **genomgång** för att göra allt så robust som möjligt.
+1. **Fokustestet** (avsnitt 6). *Varför:* läsningar kom gång på gång bara medan autofokus sökte, och i 1080p nära (≤0,23 m) räckte pixlarna men inget lästes när fokus hade landat. Avgör om fokus är begränsningen, och vad knappskanningen ska göra (t.ex. sätta fokus för nära håll vid tryck).
+2. **Mät vinkeln.** Mobilens vattenpass vid varje körning, och längre fram lutning ur djupet (vänster mot höger sida av koden). *Varför:* vinkel/vridning är den enda variabel som passar alla körningar, och den är inte mätt.
+3. **Säkerhetslager för felläsningar.** *Varför:* felen är systematiska och reproducerbara, och px/modul kan inte flagga en enskild läsning. Kombinera (a) en pixelgräns **per läge** (4K ~1,85, 1080p ~2,2, ska valideras på nya körningar), (b) röstning över några sekunder (fungerade i 4K, inte i 1080p) och (c) kontroll mot butikens produktlista. Gemini kan dubbelkolla vid osäkerhet. Räkna inte med att tröskeln ensam räcker.
+   - Ett förslag Elias har sett men inte beslutat: logga skärpa i just kodens ruta. Det flaggar inte enskilda fel (rätt och fel kom i samma bildruta), men förklarar träffprocent mellan uppställningar.
+4. **Kontrollera djupet mot måttband** (0,3 / 0,5 / 1,0 / 1,5 m). *Varför:* stereofelet växer med avståndet i kvadrat, och skillnaden mot måttbandet växlade +0,7 till +3,1 cm utan mönster. Djupet skrivs bara ut när en kod läses, så avstånd bortom läsgränsen kräver en större testkod.
+5. **Positionstestet.** Lägg om tejpkorsen (de gamla låg 0,6–1,0 m från varan, för långt för att läsa koden) på ~0,35 m och kör 4K. *Varför:* mäter hela kedjan karta → kod → position. Räkna med att sidoavvikelse är största felkällan.
+6. **Röstvägledning för siktet** (Elias vill fundera extra på den, och tycker den är en bra funktion). Se nedan. *Varför:* löser sikteproblemet, som är designkrav för blinda användare.
+7. **Knappskanning** (USB-knapp via `evdev`, systemd): kameran sitter på pannband och följer huvudet. Skanna några sekunder vid tryck. *Varför:* mindre ström, inga oönskade avläsningar, passar att användaren "tittar" på varan.
+8. **Gemini som reserv** när ingen kod syns eller den är osäker (produktigenkänning, "koden sitter på baksidan, vänd paketet"). *Varför:* skalar till hundratals produkter utan att träna egna modeller.
+9. **Hyllkantsetiketter**, **integration** med `detect_spatial.py` (en kamera, säkerhetslarmen först, position på nivå 3 i ljudkön), eventuell **AI-agent** med verktyg (`ta_bild`, `läs_streckkod`, `slå_upp_i_kartan`, `säg`; aldrig säkerhet), sist en **genomgång** för att göra allt så robust som möjligt.
 
 ### Röstvägledning: designen vi landade i (inte implementerad)
 Siktet kräver snabb återkoppling (5–10 gånger per sekund), så **det får inte gå via Gemini/Claude** (1–3 s, kräver nät, kostar). Allt som behövs finns lokalt:
@@ -242,10 +258,13 @@ Siktet kräver snabb återkoppling (5–10 gånger per sekund), så **det får i
 # På Pi:n
 cd ~/ai_glasses && git pull && sync && source venv/bin/activate
 python3 barcode_scanner.py --diag --4k --facit 7340083497834   # utan --4k för 1080p
+python3 barcode_scanner.py --diag --facit 7340083497834 --fokus 130   # låst lins (N 0-255, ta fram värdet med lins-raderna)
 vcgencmd get_throttled; vcgencmd pmic_read_adc EXT5V_V          # ström
 lsusb -t                                                        # USB3 (5000M) eller USB2 (480M)
 python3 tts_engine.py --prewarm                                 # förgenerera tal (inte samtidigt som detect_spatial.py)
 ```
+
+Sammanställning av alla körningar (läsningar, rätt/fel, px/modul per loggfil) görs med ett kort Python-skript som läser `logs/scan_*.jsonl` (fälten står i avsnitt 3). Träffprocent (försök) finns bara i terminalens sammanfattning.
 
 Elias hämtar bilder genom att högerklicka i VS Code och välja **Download**. Skriv `clear` före en körning så att bara den nya utskriften kopieras. Översiktsbilder (de 16 senaste bilderna i en mosaik) har gjorts med ett kort OpenCV-skript. Skriv om det vid behov, och ta bilden **innan** bilderna rensas med `rm logs/snapshots/snap_*.jpg`.
 
@@ -254,10 +273,11 @@ Elias hämtar bilder genom att högerklicka i VS Code och välja **Download**. S
 ---
 
 ## 10. Öppna frågor till Elias
-- Är dagsljustestet med `--facit` kört? Vilka resultat?
-- Har Pi:n hämtat `main` (PR #6 och #7)?
+- Har Pi:n hämtat `main` med PR #9, och har fokustestet (steg A och B i avsnitt 6) körts? Vilka linspositioner visades?
+- Vad ska uppställningen heta när den blir standard (tejpmärken, stöd, bakgrund), så att resultaten går att upprepa?
 - Vilken butik/vilka butiker finns det tillgång till för att spana in etiketter?
 - Röstvägledningen: ton, ord eller båda? Vilken konvention för riktning?
 - Datum för inköp av strömförsörjning (efter den 25:e) och vilken UPS HAT/PSU?
+- Ska skärpa i kodens ruta loggas (se avsnitt 7, punkt 3)? Elias har inte tagit ställning.
 
-*Det fullständiga samtalsunderlaget (om det finns kvar i sessionens miljö) ligger under `~/.claude/projects/` för sessionen. Räkna inte med att det finns: miljön är tillfällig. Arbetsloggarna (PDF) som gjordes för Elias ligger inte i repot eftersom de innehåller rummets mått. Elias har egna kopior.*
+*Det fullständiga samtalsunderlaget (om det finns kvar i sessionens miljö) ligger under `~/.claude/projects/` för sessionen. Räkna inte med att det finns: miljön är tillfällig. Arbetsloggarna (PDF) som gjordes för Elias ligger inte i repot eftersom de innehåller rummets mått. Elias har egna kopior. Rådata (`logs/scan_20261017_*.jsonl`) ligger bara på Pi:n.*
