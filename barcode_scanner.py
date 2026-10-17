@@ -39,6 +39,15 @@
 #     ställer in sig), hur många som hade en kod och hur många som hade RÄTT kod (--facit).
 #     Visas vid Ctrl+C, så att träffprocent per avstånd går att räkna utan stoppur.
 #     Bara i sammanfattningen i terminalen, inte i loggen.
+# Runda 4 (2026-10-17, efter 4K- och 1080p-serierna): läsningar kom ofta bara medan autofokus
+# SÖKTE (efter att paketet rörts) och inte när den hade landat, även med gott om pixlar.
+# 18. Linspositionen (lins, 0-255), exponeringstiden (exp_us) och ISO loggas per läsning och
+#     visas i --diag-raden. Då syns var autofokus landar och vid vilken linsposition koden läses.
+#     Sammanfattningen visar linsposition för alla bildrutor jämfört med de med rätt kod.
+# 19. --fokus N (0-255): låser linsen manuellt (autofokus av). Hittar man ett N som läser stabilt
+#     vet vi att fokus var begränsningen. Okänt vilket N som motsvarar vilket avstånd på just den här
+#     kameran: ta fram det med lins-värdena från 18. Skalan är kamerans egen, inte centimeter.
+#     Inte testat mot riktig kamera. Pipelinen byggs och ratten sätts i testet, ingen enhet fanns.
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående: rör inga andra filer. Kör ALDRIG samtidigt som detect_spatial.py.
@@ -51,10 +60,11 @@ och räknar ut var användaren står: produktens position + avståndet från
 djupkameran, i riktningen som hyllans "facing" anger.
 
 Kräver:  pip install zxing-cpp numpy   (depthai finns redan i venv)
-Kör:     python3 barcode_scanner.py [kartor/produkter.geojson] [--diag] [--4k] [--facit EAN]
+Kör:     python3 barcode_scanner.py [kartor/produkter.geojson] [--diag] [--4k] [--facit EAN] [--fokus N]
          --diag   sparar logs/snapshots/*.jpg varannan sekund och visar ljus/skärpa
          --4k     läser i 3840x2160 (längre läsavstånd, mer CPU/USB)
          --facit  rätt streckkod i testet, t.ex. 7340083497834: markerar felläsningar
+         --fokus  låser linsen på position N (0-255), i stället för autofokus
 Logg:    logs/scan_<datum>_<tid>_<4k|1080p>.jsonl (en rad per avläsning)
 """
 import argparse
@@ -144,7 +154,7 @@ def user_position(cand, d):
     return None
 
 
-def build_pipeline(uhd=False):
+def build_pipeline(uhd=False, focus=None):
     pipeline = dai.Pipeline()
     fps = UHD_FPS if uhd else CAMERA_FPS
 
@@ -158,6 +168,8 @@ def build_pipeline(uhd=False):
         cam.setVideoSize(COLOR_W, COLOR_H)
     cam.setInterleaved(False)
     cam.setFps(fps)
+    if focus is not None:
+        cam.initialControl.setManualFocus(focus)   # låst lins, autofokus av
 
     mono_l = pipeline.create(dai.node.MonoCamera)
     mono_r = pipeline.create(dai.node.MonoCamera)
@@ -251,18 +263,28 @@ def code_geometry(position, frame_shape):
     }
 
 
+def frame_meta(frame_msg):
+    """Linsposition (0-255), exponeringstid (mikrosekunder) och ISO för bilden. Tom dict om det saknas."""
+    try:
+        return {"lins": int(frame_msg.getLensPosition()),
+                "exp_us": int(frame_msg.getExposureTime().total_seconds() * 1e6),
+                "iso": int(frame_msg.getSensitivity())}
+    except Exception:
+        return {}
+
+
 def write_log(log, rec):
     log.write(json.dumps(rec, ensure_ascii=False) + "\n")
     log.flush()
     os.fsync(log.fileno())   # överlever strömavbrott
 
 
-def handle_barcode(res, color, depth, products, log, now, mode="1080p", facit=None, stats=None):
+def handle_barcode(res, color, depth, products, log, now, mode="1080p", facit=None, stats=None, meta=None):
     """Loggar ALLA avläsningar (även okända och felaktiga), skriver ut de som har ett användbart svar."""
     ean = normalize_ean(res.text)
     geo = code_geometry(res.position, color.shape)
     rec = {"t": round(now, 3), "mode": mode, "raw": res.text, "ean": ean,
-           "format": str(res.format), **geo}
+           "format": str(res.format), **geo, **(meta or {})}
     tag = ""
     if facit:
         rec["facit"] = facit
@@ -315,11 +337,11 @@ def handle_barcode(res, color, depth, products, log, now, mode="1080p", facit=No
     write_log(log, rec)
 
 
-def median_min(values):
+def median_min(values, decimals=2):
     if not values:
         return "–"
     v = sorted(values)
-    return f"median {v[len(v) // 2]:.2f}, min {v[0]:.2f}, max {v[-1]:.2f}"
+    return f"median {v[len(v) // 2]:.{decimals}f}, min {v[0]:.{decimals}f}, max {v[-1]:.{decimals}f}"
 
 
 def print_summary(mode, facit, stats, log_path):
@@ -334,15 +356,20 @@ def print_summary(mode, facit, stats, log_path):
         print(f"  Facit {facit}: {stats['right']} rätt, {stats['wrong']} fel")
         print(f"  px/modul, rätta: {median_min(stats['px_right'])}")
         print(f"  px/modul, fel:   {median_min(stats['px_wrong'])}")
+    if stats.get("lens_all"):
+        print(f"  Linsposition, alla bildrutor:        {median_min(stats['lens_all'], 0)}")
+        if stats.get("lens_hit"):
+            print(f"  Linsposition, bildrutor med rätt kod: {median_min(stats['lens_hit'], 0)}")
 
 
-def diagnose(color, results, n_saved, folder):
+def diagnose(color, results, n_saved, folder, meta=None):
     """Ljus och skärpa i bilden, och sparar en märkt bild. Returnerar en statusrad."""
     gray = cv2.cvtColor(cv2.resize(color, (960, 540)), cv2.COLOR_BGR2GRAY)
     brightness = float(gray.mean())                              # 0 = svart, 255 = vitt
     sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())     # lågt = suddigt
     status = (f"📷 ljus {brightness:3.0f}/255 ({'mörkt' if brightness < 60 else 'ok'})  "
               f"skärpa {sharpness:5.0f} ({'suddigt' if sharpness < 50 else 'ok'})  "
+              f"{'lins %3d  ' % meta['lins'] if meta and 'lins' in meta else ''}"
               f"koder: {[r.text for r in results] or 'inga'}")
 
     if n_saved < DIAG_MAX_IMAGES:
@@ -365,9 +392,13 @@ def main():
     ap.add_argument("karta", nargs="?", default=DEFAULT_MAP)
     ap.add_argument("--diag", action="store_true", help="spara bilder och visa ljus/skärpa varannan sekund")
     ap.add_argument("--4k", dest="uhd", action="store_true", help="läs i 3840x2160 (längre läsavstånd)")
+    ap.add_argument("--fokus", type=int, metavar="N",
+                    help="lås linsen på position N (0-255) i stället för autofokus")
     ap.add_argument("--facit", metavar="EAN",
                     help="rätt streckkod i testet: loggar varje läsning som rätt/fel och märker felläsningar")
     args = ap.parse_args()
+    if args.fokus is not None and not 0 <= args.fokus <= 255:
+        sys.exit(f"❌ --fokus {args.fokus} är utanför 0-255")
     facit = None
     if args.facit:
         facit = normalize_ean(args.facit)
@@ -382,14 +413,15 @@ def main():
     os.makedirs("logs", exist_ok=True)
     log_path = f"logs/scan_{time.strftime('%Y%m%d_%H%M%S')}_{mode}.jsonl"
     stats = {"reads": 0, "right": 0, "wrong": 0, "px_right": [], "px_wrong": [],
-             "tries": 0, "hit_frames": 0, "right_frames": 0}
+             "tries": 0, "hit_frames": 0, "right_frames": 0, "lens_all": [], "lens_hit": []}
     if facit:
         print(f"Facit: {facit}. Felläsningar markeras.")
 
     scan_interval = UHD_SCAN_INTERVAL_S if args.uhd else SCAN_INTERVAL_S
-    with dai.Device(build_pipeline(uhd=args.uhd)) as device, open(log_path, "a", encoding="utf-8") as log:
+    with dai.Device(build_pipeline(uhd=args.uhd, focus=args.fokus)) as device, open(log_path, "a", encoding="utf-8") as log:
         usb = device.getUsbSpeed()
         print(f"Kamera: {'4K 3840x2160 @ ' + str(UHD_FPS) if args.uhd else '1080p @ ' + str(CAMERA_FPS)} fps, USB {usb.name}")
+        print(f"Fokus: {'manuell, linsposition ' + str(args.fokus) if args.fokus is not None else 'autofokus'}")
         if args.uhd and usb not in (dai.UsbSpeed.SUPER, dai.UsbSpeed.SUPER_PLUS):
             print("⚠️  4K kräver USB3 (blå port). Med USB2 kan bilden hacka eller utebli.")
         q = device.getOutputQueue(name="out", maxSize=4, blocking=False)
@@ -411,18 +443,23 @@ def main():
                 last_scan = now
 
                 color = msg["color"].getCvFrame()
+                meta = frame_meta(msg["color"])
                 depth = msg["depth"].getFrame()   # uint16, millimeter
                 results = zxingcpp.read_barcodes(color, formats=BARCODE_FORMATS)
                 for res in results:
-                    handle_barcode(res, color, depth, products, log, now, mode, facit, stats)
+                    handle_barcode(res, color, depth, products, log, now, mode, facit, stats, meta)
                 if now - started >= WARMUP_S:
                     stats["tries"] += 1
+                    if "lins" in meta:
+                        stats["lens_all"].append(meta["lins"])
+                        if facit and any(normalize_ean(r.text) == facit for r in results):
+                            stats["lens_hit"].append(meta["lins"])
                     stats["hit_frames"] += bool(results)
                     stats["right_frames"] += bool(facit and any(normalize_ean(r.text) == facit for r in results))
 
                 if args.diag and now - last_diag >= DIAG_INTERVAL_S:
                     last_diag = now
-                    print(diagnose(color, results, n_saved, diag_dir))
+                    print(diagnose(color, results, n_saved, diag_dir, meta))
                     n_saved += 1
         except KeyboardInterrupt:
             print("\nAvslutar.")
