@@ -63,12 +63,21 @@
 #     gånger åt något håll. DEPTH_K är uppmätt på tomatpurén (modul ~0,35 mm): djup * px/modul
 #     ~0,51-0,55 m i 1080p och ~1,0 m i 4K. Faktor 3 täcker moduler ~0,12-1 mm.
 #     Behandlar symptomet: varför djupet är fel i början är inte utrett.
-# 23. --filter slår på avvisandet: avvisade läsningar ger ingen vara och ingen position, bara en
-#     kort rad. Utan --filter visas "[filter: ...]" efter raden. Fältet "filter" i loggen listar
-#     skälen. Sammanfattningen visar hur många rätta och fel varje filter fångade.
+# 23. --filter slår på avvisandet. Utan --filter visas "[filter: ...]" efter raden. Fältet "filter"
+#     i loggen listar skälen. Sammanfattningen visar hur många rätta och fel varje filter fångade.
+# Runda 6 (2026-10-20, efter extern granskning av runda 5):
+# 24. Gränserna och filterreglerna ligger i scan_filters.py, så att analyze_scans.py kan använda
+#     samma regler utan kameran.
+# 25. De två filtren har olika följd med --filter. "tunn": koden går inte att lita på, läsningen
+#     avvisas helt. "orimligt djup": koden är godkänd men avståndet inte, så varan sägs utan
+#     position. Samma sak när djup saknas helt (förut sades varan inte alls då).
+# 26. Sammanfattningen visar bildrutor med rätt kod både före filter (jämförbart med äldre körningar)
+#     och efter höjdfiltret.
+# 27. Sammanfattningen visar hur många bildrutor per sekund kameran levererade (mottagna, och enligt
+#     kamerans sekvensnummer). Skannerns egen gräns (3/s i 1080p, 2/s i 4K) säger inget om USB.
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
-# Fristående: rör inga andra filer. Kör ALDRIG samtidigt som detect_spatial.py.
+# Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
 # ===============================================================
 """
 barcode_scanner.py - Positionsbestämning med produkter som landmärken.
@@ -83,7 +92,7 @@ Kör:     python3 barcode_scanner.py [kartor/produkter.geojson] [--diag] [--4k] 
          --4k     läser i 3840x2160 (längre läsavstånd, mer CPU/USB)
          --facit  rätt streckkod i testet, t.ex. 7340083497834: markerar felläsningar
          --fokus  låser linsen på position N (0-255), i stället för autofokus
-         --filter avvisar tunna remsor och orimligt djup (utan flaggan loggas det bara)
+         --filter avvisar tunna remsor, och ger ingen position vid orimligt djup (utan flaggan loggas det bara)
 Logg:    logs/scan_<datum>_<tid>_<4k|1080p>.jsonl (en rad per avläsning)
 """
 import argparse
@@ -98,6 +107,8 @@ import cv2
 import depthai as dai
 import numpy as np
 import zxingcpp
+
+from scan_filters import FILTER_TEXT, MODULES, depth_plausible, expected_depth, is_thin, size_from_corners
 
 DEFAULT_MAP = "kartor/produkter.geojson"
 WARMUP_S = 10               # försök räknas först efter detta (autofokus och exponering ställer in sig)
@@ -115,10 +126,6 @@ MIN_VALID_PX = 20           # minst så många giltiga djuppixlar för att lita 
 DIAG_INTERVAL_S = 2.0      # --diag: en bild varannan sekund
 DIAG_MAX_IMAGES = 60       # --diag: sluta spara efter så många (skonar SD-kortet)
 BARCODE_FORMATS = (zxingcpp.BarcodeFormat.EAN13, zxingcpp.BarcodeFormat.UPCA)
-MODULES = 95                # EAN-13 och UPC-A: 95 moduler (grundstreck) mellan första och sista strecket
-MIN_HEIGHT_RATIO = 0.15     # höjd/bredd under detta = tunn remsa (ändring 21)
-DEPTH_K = {"1080p": 0.52, "4k": 1.0}   # djup (m) * px/modul, uppmätt på tomatpurén (ändring 22)
-DEPTH_FACTOR = 3            # djupet får skilja högst så många gånger från det kodens storlek säger
 
 
 def normalize_ean(code):
@@ -271,12 +278,7 @@ def code_geometry(position, frame_shape):
     """
     tl, tr, br, bl = ((c.x, c.y) for c in (position.top_left, position.top_right,
                                            position.bottom_right, position.bottom_left))
-
-    def dist(a, b):
-        return math.hypot(a[0] - b[0], a[1] - b[1])
-
-    width = (dist(tl, tr) + dist(bl, br)) / 2
-    height = (dist(tl, bl) + dist(tr, br)) / 2   # längs kodens sidor, så att roterade koder mäts rätt
+    width, height = size_from_corners(tl, tr, br, bl)
     return {
         "w_px": round(width, 1),
         "h_px": round(height, 1),
@@ -286,18 +288,6 @@ def code_geometry(position, frame_shape):
         "hornen": [[round(x), round(y)] for x, y in (tl, tr, br, bl)],
         "bild": [frame_shape[1], frame_shape[0]],
     }
-
-
-def expected_depth(geo, mode):
-    """Avståndet (m) som kodens storlek i bilden motsvarar, för en kod lik tomatpurén (ändring 22)."""
-    return DEPTH_K[mode] / geo["px_per_modul"] if geo["px_per_modul"] > 0 else None
-
-
-def depth_plausible(d, expected):
-    return expected is None or expected / DEPTH_FACTOR <= d <= expected * DEPTH_FACTOR
-
-
-FILTER_TEXT = {"tunn": "tunn remsa av koden", "orimligt djup": "orimligt djup"}
 
 
 def frame_meta(frame_msg):
@@ -317,13 +307,16 @@ def write_log(log, rec):
 
 
 def count_filters(stats, rec):
-    """Hur många läsningar varje filter fångade, och med --facit hur många av dem som var rätt/fel."""
+    """
+    Hur många läsningar varje filter fångade, och med --facit hur många av dem som var rätt/fel.
+    "Efter filter" räknar läsningar vars KOD godkändes (inte tunn). Orimligt djup påverkar bara positionen.
+    """
     for reason in rec["filter"]:
         f = stats["filtered"].setdefault(reason, {"n": 0, "right": 0, "wrong": 0})
         f["n"] += 1
         if "correct" in rec:
             f["right" if rec["correct"] else "wrong"] += 1
-    if "correct" in rec and not rec["filter"]:
+    if "correct" in rec and "tunn" not in rec["filter"]:
         stats["kept_right" if rec["correct"] else "kept_wrong"] += 1
 
 
@@ -331,15 +324,16 @@ def handle_barcode(res, color, depth, products, log, now, mode="1080p", facit=No
                    use_filter=False):
     """
     Loggar ALLA avläsningar (även okända, felaktiga och filtrerade), skriver ut de som har ett användbart svar.
-    use_filter: avvisa läsningar som filtren fångar (ändring 23). Annars loggas och märks de bara.
+    use_filter (ändring 25): "tunn" avvisar läsningen helt, "orimligt djup" ger varan utan position.
+    Utan use_filter loggas och märks de bara. Returnerar loggraden.
     """
     ean = normalize_ean(res.text)
     geo = code_geometry(res.position, color.shape)
-    expected = expected_depth(geo, mode)
+    expected = expected_depth(geo["px_per_modul"], mode)
     rec = {"t": round(now, 3), "mode": mode, "raw": res.text, "ean": ean,
            "format": str(res.format), **geo, **(meta or {}),
            "forvantat_djup_m": round(expected, 3) if expected else None,
-           "filter": ["tunn"] if geo["hojd_andel"] < MIN_HEIGHT_RATIO else []}
+           "filter": ["tunn"] if is_thin(geo["hojd_andel"]) else []}
     tag = ""
     if facit:
         rec["facit"] = facit
@@ -360,7 +354,7 @@ def handle_barcode(res, color, depth, products, log, now, mode="1080p", facit=No
     if not ean:
         rec.update(in_map=False, distance_m=None, depth_how="ogiltig streckkod")
         done()
-        return
+        return rec
 
     d, how = depth_at(depth, color.shape, (res.position.top_left, res.position.top_right,
                                            res.position.bottom_right, res.position.bottom_left))
@@ -370,25 +364,32 @@ def handle_barcode(res, color, depth, products, log, now, mode="1080p", facit=No
     if d is not None and not depth_plausible(d, expected):
         rec["filter"].append("orimligt djup")
     px = f"{geo['px_per_modul']:.1f} px/modul"
-    why = ", ".join(FILTER_TEXT[r] for r in rec["filter"])
-    dist = f"{d:.2f} m (väntat ~{expected:.2f})" if d is not None and expected else "inget djup"
 
-    if use_filter and rec["filter"]:
-        print(f"[{ean}] ⛔ avvisad: {why}, {dist}, {px}{tag}")
+    if use_filter and "tunn" in rec["filter"]:
+        print(f"[{ean}] ⛔ avvisad: {FILTER_TEXT['tunn']}, {px}{tag}")
         done()
-        return
-    if rec["filter"]:
-        tag += f"  [filter: {why}]"
+        return rec
+    if not use_filter and rec["filter"]:
+        tag += f"  [filter: {', '.join(FILTER_TEXT[r] for r in rec['filter'])}]"
 
-    if d is None:
-        print(f"[{ean}] Hittad, men inget djup, {px}: {how}{tag}")
+    # Ingen position: djup saknas, eller (med --filter) djupet stämmer inte med kodens storlek.
+    # Koden är godkänd, så varan sägs ändå.
+    if d is None or (use_filter and "orimligt djup" in rec["filter"]):
+        why = how if d is None else f"djupet {d:.2f} m är orimligt (väntat ~{expected:.2f} m)"
+        if ean in products:
+            name = products[ean][0]["namn"]
+            print(f"\n--- {name} ({ean}), {px}{tag} ---")
+            print(f"   ⚠️  Ingen position: {why}")
+            rec.update(namn=name, candidates=[], ambiguous=False)
+        else:
+            print(f"\n[OKÄND VARA] {ean}, ingen position ({why}), {px} (finns inte i kartan){tag}")
         done()
-        return
+        return rec
 
     if ean not in products:
         print(f"\n[OKÄND VARA] {ean}, {d:.2f} m bort, {px} (finns inte i kartan){tag}")
         done()
-        return
+        return rec
 
     cands = products[ean]
     positions = []
@@ -406,6 +407,7 @@ def handle_barcode(res, color, depth, products, log, now, mode="1080p", facit=No
 
     rec.update(namn=cands[0]["namn"], candidates=positions, ambiguous=ambiguous)
     done()
+    return rec
 
 
 def median_min(values, decimals=2):
@@ -421,7 +423,8 @@ def print_summary(mode, facit, stats, log_path, use_filter=False):
     if tries:
         line = f"  Försök efter {WARMUP_S} s uppvärmning: {tries} bildrutor, {stats['hit_frames']} med kod ({stats['hit_frames'] / tries:.0%})"
         if facit:
-            line += f", {stats['right_frames']} med rätt kod ({stats['right_frames'] / tries:.0%})"
+            line += (f", {stats['right_frames']} med rätt kod ({stats['right_frames'] / tries:.0%}) före filter"
+                     f", {stats['right_frames_kept']} ({stats['right_frames_kept'] / tries:.0%}) efter höjdfiltret")
         print(line)
     if facit:
         print(f"  Facit {facit}: {stats['right']} rätt, {stats['wrong']} fel")
@@ -431,7 +434,13 @@ def print_summary(mode, facit, stats, log_path, use_filter=False):
         print(f"  Linsposition, alla bildrutor:        {median_min(stats['lens_all'], 0)}")
         if stats.get("lens_hit"):
             print(f"  Linsposition, bildrutor med rätt kod: {median_min(stats['lens_hit'], 0)}")
-    print(f"  Filter ({'PÅ, avvisade' if use_filter else 'AV, bara loggat'}):")
+    span = (stats["t_last"] or 0) - (stats["t_first"] or 0)
+    if stats["msgs"] > 1 and span > 0:
+        line = f"  Kameran: {(stats['msgs'] - 1) / span:.1f} bildrutor/s mottagna"
+        if stats["seq_first"] is not None and stats["seq_last"] is not None:
+            line += f", {(stats['seq_last'] - stats['seq_first']) / span:.1f}/s enligt kamerans sekvensnummer"
+        print(line + f" (inställt {stats['fps_set']} fps, skannern avkodar högst {stats['scan_max']:.0f}/s)")
+    print(f"  Filter ({'PÅ' if use_filter else 'AV, bara loggat'}):")
     if not stats["filtered"]:
         print("    inga läsningar fångades")
     for reason, f in stats["filtered"].items():
@@ -440,7 +449,7 @@ def print_summary(mode, facit, stats, log_path, use_filter=False):
             line += f" ({f['right']} rätt kod, {f['wrong']} fel kod)"
         print(line)
     if facit:
-        print(f"  Efter filter: {stats['kept_right']} rätt, {stats['kept_wrong']} fel")
+        print(f"  Efter höjdfiltret (koden godkänd): {stats['kept_right']} rätt, {stats['kept_wrong']} fel")
 
 
 def diagnose(color, results, n_saved, folder, meta=None):
@@ -478,7 +487,7 @@ def main():
     ap.add_argument("--facit", metavar="EAN",
                     help="rätt streckkod i testet: loggar varje läsning som rätt/fel och märker felläsningar")
     ap.add_argument("--filter", action="store_true",
-                    help="avvisa tunna remsor och orimligt djup (utan flaggan loggas det bara)")
+                    help="avvisa tunna remsor, ingen position vid orimligt djup (utan flaggan loggas det bara)")
     args = ap.parse_args()
     if args.fokus is not None and not 0 <= args.fokus <= 255:
         sys.exit(f"❌ --fokus {args.fokus} är utanför 0-255")
@@ -497,16 +506,19 @@ def main():
     log_path = f"logs/scan_{time.strftime('%Y%m%d_%H%M%S')}_{mode}.jsonl"
     stats = {"reads": 0, "right": 0, "wrong": 0, "px_right": [], "px_wrong": [],
              "tries": 0, "hit_frames": 0, "right_frames": 0, "lens_all": [], "lens_hit": [],
-             "filtered": {}, "kept_right": 0, "kept_wrong": 0}
+             "filtered": {}, "kept_right": 0, "kept_wrong": 0, "right_frames_kept": 0,
+             "msgs": 0, "t_first": None, "t_last": None, "seq_first": None, "seq_last": None}
     if facit:
         print(f"Facit: {facit}. Felläsningar markeras.")
 
     scan_interval = UHD_SCAN_INTERVAL_S if args.uhd else SCAN_INTERVAL_S
+    stats["fps_set"] = UHD_FPS if args.uhd else CAMERA_FPS
+    stats["scan_max"] = 1 / scan_interval
     with dai.Device(build_pipeline(uhd=args.uhd, focus=args.fokus)) as device, open(log_path, "a", encoding="utf-8") as log:
         usb = device.getUsbSpeed()
         print(f"Kamera: {'4K 3840x2160 @ ' + str(UHD_FPS) if args.uhd else '1080p @ ' + str(CAMERA_FPS)} fps, USB {usb.name}")
         print(f"Fokus: {'manuell, linsposition ' + str(args.fokus) if args.fokus is not None else 'autofokus'}")
-        print(f"Filter: {'PÅ (avvisar tunna remsor och orimligt djup)' if args.filter else 'AV (loggas och märks bara)'}")
+        print(f"Filter: {'PÅ (avvisar tunna remsor, ingen position vid orimligt djup)' if args.filter else 'AV (loggas och märks bara)'}")
         if args.uhd and usb not in (dai.UsbSpeed.SUPER, dai.UsbSpeed.SUPER_PLUS):
             print("⚠️  4K kräver USB3 (blå port). Med USB2 kan bilden hacka eller utebli.")
         q = device.getOutputQueue(name="out", maxSize=4, blocking=False)
@@ -522,6 +534,16 @@ def main():
             while True:
                 msg = q.get()
                 now = time.time()
+                # Hur många bildrutor kameran faktiskt levererar (ändring 27), före skannerns egen gräns
+                stats["msgs"] += 1
+                stats["t_first"] = stats["t_first"] or now
+                stats["t_last"] = now
+                try:
+                    seq = msg["color"].getSequenceNum()
+                    stats["seq_first"] = seq if stats["seq_first"] is None else stats["seq_first"]
+                    stats["seq_last"] = seq
+                except Exception:
+                    pass
                 # Begränsa ALLA avkodningar, även när ingen kod syns (CPU = ström)
                 if now - last_scan < scan_interval:
                     continue
@@ -531,9 +553,10 @@ def main():
                 meta = frame_meta(msg["color"])
                 depth = msg["depth"].getFrame()   # uint16, millimeter
                 results = zxingcpp.read_barcodes(color, formats=BARCODE_FORMATS)
-                for res in results:
-                    handle_barcode(res, color, depth, products, log, now, mode, facit, stats, meta, args.filter)
+                recs = [handle_barcode(res, color, depth, products, log, now, mode, facit, stats, meta, args.filter)
+                        for res in results]
                 if now - started >= WARMUP_S:
+                    stats["right_frames_kept"] += any(r.get("correct") and "tunn" not in r["filter"] for r in recs)
                     stats["tries"] += 1
                     if "lins" in meta:
                         stats["lens_all"].append(meta["lins"])

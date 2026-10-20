@@ -5,11 +5,12 @@
 # - Orimligt djup: vilka läsningar som har det, varifrån djupet togs (depth_how) och hur
 #   långt in i körningen de kom. Gamla loggar utan de nya fälten räknas om från hornen.
 # Läser bara loggarna, ändrar ingenting. Trasiga rader (strömavbrott) hoppas över.
+# Reglerna läses från scan_filters.py, så skriptet går även på en dator utan kameran.
 # =========================================================================
 """
 analyze_scans.py - Utvärderar höjd- och djupfiltren på skannerloggarna.
 
-Användning (i venv, eftersom gränserna läses från barcode_scanner.py):
+Användning:
     python3 analyze_scans.py                              # alla logs/scan_*.jsonl
     python3 analyze_scans.py logs/scan_20261020_*.jsonl   # bara vissa loggar
     python3 analyze_scans.py --utan 20261017_140916       # utan körningar vars namn innehåller texten
@@ -17,11 +18,10 @@ Användning (i venv, eftersom gränserna läses från barcode_scanner.py):
 import argparse
 import glob
 import json
-import math
 import os
 from collections import Counter
 
-from barcode_scanner import DEPTH_FACTOR, DEPTH_K, MIN_HEIGHT_RATIO
+from scan_filters import DEPTH_FACTOR, MIN_HEIGHT_RATIO, depth_plausible, expected_depth, size_from_corners
 
 RATIO_LIMITS = (0.05, 0.10, 0.15, 0.20)
 PX_LIMITS = (5, 10, 15, 20, 30)
@@ -49,8 +49,7 @@ def height(rec):
     corners, w = rec.get("hornen"), rec.get("w_px")
     if not corners or not w:
         return None
-    tl, tr, br, bl = corners
-    h = (math.dist(tl, bl) + math.dist(tr, br)) / 2
+    _, h = size_from_corners(*corners)
     return h, h / w
 
 
@@ -103,19 +102,19 @@ def main():
         first_t = rows[0]["t"] if rows and "t" in rows[0] else None
         bad = []
         for r in rows:
-            d, px, mode = r.get("distance_m"), r.get("px_per_modul"), r.get("mode")
-            if d is None or not px or mode not in DEPTH_K:
+            d = r.get("distance_m")
+            expected = expected_depth(r.get("px_per_modul"), r.get("mode"))
+            if d is None or expected is None:
                 continue
             n_depth += 1
-            expected = DEPTH_K[mode] / px
-            if not expected / DEPTH_FACTOR <= d <= expected * DEPTH_FACTOR:
-                bad.append(r)
+            if not depth_plausible(d, expected):
+                bad.append((r, expected))
                 sources[r.get("depth_how", "?")] += 1
         if bad:
             print(f"  {name}: {len(bad)} st")
-            for r in bad:
+            for r, expected in bad:
                 after = f"{r['t'] - first_t:5.1f} s" if first_t is not None else "?"
-                print(f"    {r['distance_m']:6.2f} m (väntat ~{DEPTH_K[r['mode']] / r['px_per_modul']:.2f}), "
+                print(f"    {r['distance_m']:6.2f} m (väntat ~{expected:.2f}), "
                       f"källa: {r.get('depth_how', '?')}, {after} efter första läsningen")
     print(f"  Totalt {sum(sources.values())} av {n_depth} läsningar med djup. Källa: "
           + (", ".join(f"{k} {v}" for k, v in sources.items()) or "–"))
