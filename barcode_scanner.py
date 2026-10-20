@@ -48,6 +48,24 @@
 #     vet vi att fokus var begränsningen. Okänt vilket N som motsvarar vilket avstånd på just den här
 #     kameran: ta fram det med lins-värdena från 18. Skalan är kamerans egen, inte centimeter.
 #     Inte testat mot riktig kamera. Pipelinen byggs och ratten sätts i testet, ingen enhet fanns.
+# Runda 5 (2026-10-20, efter fokustesten 18 och 20 oktober): felläsningar kom nästan alltid från
+# en tunn remsa av koden, och djupet var 3-13 m fel de första sekunderna (både "mitten" och
+# "kodens yta"). Filtren nedan LOGGAR alltid vad de skulle göra. De avvisar bara med --filter,
+# så att de kan utvärderas på nya körningar utan att data går förlorad.
+# 20. Kodens höjd i bilden loggas: h_px (längs kodens sidor, fungerar även roterad) och
+#     hojd_andel = h_px / w_px. Rätta läsningar på tomatpurén: ~0,6-0,7. Felläsningar: oftast 1-14 px.
+# 21. Höjdfilter "tunn": hojd_andel < MIN_HEIGHT_RATIO (0,15). På loggarna 17-20/10 stoppade det
+#     60 av 62 fel och kastade 135 av 1409 rätta. KÄND RISK: en hel men kort kod (t.ex. avkortade
+#     streck på små förpackningar eller hyllkantsetiketter) kan ha höjd/bredd ~0,1 och avvisas.
+#     Regeln (andel, pixlar eller båda) ska väljas med analyze_scans.py på nya körningar.
+# 22. Djupfilter "orimligt djup": djupet jämförs med vad kodens storlek säger,
+#     forvantat_djup_m = DEPTH_K[läge] / px_per_modul. Avvisas om det skiljer mer än DEPTH_FACTOR (3)
+#     gånger åt något håll. DEPTH_K är uppmätt på tomatpurén (modul ~0,35 mm): djup * px/modul
+#     ~0,51-0,55 m i 1080p och ~1,0 m i 4K. Faktor 3 täcker moduler ~0,12-1 mm.
+#     Behandlar symptomet: varför djupet är fel i början är inte utrett.
+# 23. --filter slår på avvisandet: avvisade läsningar ger ingen vara och ingen position, bara en
+#     kort rad. Utan --filter visas "[filter: ...]" efter raden. Fältet "filter" i loggen listar
+#     skälen. Sammanfattningen visar hur många rätta och fel varje filter fångade.
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående: rör inga andra filer. Kör ALDRIG samtidigt som detect_spatial.py.
@@ -60,11 +78,12 @@ och räknar ut var användaren står: produktens position + avståndet från
 djupkameran, i riktningen som hyllans "facing" anger.
 
 Kräver:  pip install zxing-cpp numpy   (depthai finns redan i venv)
-Kör:     python3 barcode_scanner.py [kartor/produkter.geojson] [--diag] [--4k] [--facit EAN] [--fokus N]
+Kör:     python3 barcode_scanner.py [kartor/produkter.geojson] [--diag] [--4k] [--facit EAN] [--fokus N] [--filter]
          --diag   sparar logs/snapshots/*.jpg varannan sekund och visar ljus/skärpa
          --4k     läser i 3840x2160 (längre läsavstånd, mer CPU/USB)
          --facit  rätt streckkod i testet, t.ex. 7340083497834: markerar felläsningar
          --fokus  låser linsen på position N (0-255), i stället för autofokus
+         --filter avvisar tunna remsor och orimligt djup (utan flaggan loggas det bara)
 Logg:    logs/scan_<datum>_<tid>_<4k|1080p>.jsonl (en rad per avläsning)
 """
 import argparse
@@ -97,6 +116,9 @@ DIAG_INTERVAL_S = 2.0      # --diag: en bild varannan sekund
 DIAG_MAX_IMAGES = 60       # --diag: sluta spara efter så många (skonar SD-kortet)
 BARCODE_FORMATS = (zxingcpp.BarcodeFormat.EAN13, zxingcpp.BarcodeFormat.UPCA)
 MODULES = 95                # EAN-13 och UPC-A: 95 moduler (grundstreck) mellan första och sista strecket
+MIN_HEIGHT_RATIO = 0.15     # höjd/bredd under detta = tunn remsa (ändring 21)
+DEPTH_K = {"1080p": 0.52, "4k": 1.0}   # djup (m) * px/modul, uppmätt på tomatpurén (ändring 22)
+DEPTH_FACTOR = 3            # djupet får skilja högst så många gånger från det kodens storlek säger
 
 
 def normalize_ean(code):
@@ -254,13 +276,28 @@ def code_geometry(position, frame_shape):
         return math.hypot(a[0] - b[0], a[1] - b[1])
 
     width = (dist(tl, tr) + dist(bl, br)) / 2
+    height = (dist(tl, bl) + dist(tr, br)) / 2   # längs kodens sidor, så att roterade koder mäts rätt
     return {
         "w_px": round(width, 1),
+        "h_px": round(height, 1),
+        "hojd_andel": round(height / width, 3) if width else 0.0,
         "px_per_modul": round(width / MODULES, 2),
         "rot_deg": round(math.degrees(math.atan2(tr[1] - tl[1], tr[0] - tl[0])), 1),
         "hornen": [[round(x), round(y)] for x, y in (tl, tr, br, bl)],
         "bild": [frame_shape[1], frame_shape[0]],
     }
+
+
+def expected_depth(geo, mode):
+    """Avståndet (m) som kodens storlek i bilden motsvarar, för en kod lik tomatpurén (ändring 22)."""
+    return DEPTH_K[mode] / geo["px_per_modul"] if geo["px_per_modul"] > 0 else None
+
+
+def depth_plausible(d, expected):
+    return expected is None or expected / DEPTH_FACTOR <= d <= expected * DEPTH_FACTOR
+
+
+FILTER_TEXT = {"tunn": "tunn remsa av koden", "orimligt djup": "orimligt djup"}
 
 
 def frame_meta(frame_msg):
@@ -279,12 +316,30 @@ def write_log(log, rec):
     os.fsync(log.fileno())   # överlever strömavbrott
 
 
-def handle_barcode(res, color, depth, products, log, now, mode="1080p", facit=None, stats=None, meta=None):
-    """Loggar ALLA avläsningar (även okända och felaktiga), skriver ut de som har ett användbart svar."""
+def count_filters(stats, rec):
+    """Hur många läsningar varje filter fångade, och med --facit hur många av dem som var rätt/fel."""
+    for reason in rec["filter"]:
+        f = stats["filtered"].setdefault(reason, {"n": 0, "right": 0, "wrong": 0})
+        f["n"] += 1
+        if "correct" in rec:
+            f["right" if rec["correct"] else "wrong"] += 1
+    if "correct" in rec and not rec["filter"]:
+        stats["kept_right" if rec["correct"] else "kept_wrong"] += 1
+
+
+def handle_barcode(res, color, depth, products, log, now, mode="1080p", facit=None, stats=None, meta=None,
+                   use_filter=False):
+    """
+    Loggar ALLA avläsningar (även okända, felaktiga och filtrerade), skriver ut de som har ett användbart svar.
+    use_filter: avvisa läsningar som filtren fångar (ändring 23). Annars loggas och märks de bara.
+    """
     ean = normalize_ean(res.text)
     geo = code_geometry(res.position, color.shape)
+    expected = expected_depth(geo, mode)
     rec = {"t": round(now, 3), "mode": mode, "raw": res.text, "ean": ean,
-           "format": str(res.format), **geo, **(meta or {})}
+           "format": str(res.format), **geo, **(meta or {}),
+           "forvantat_djup_m": round(expected, 3) if expected else None,
+           "filter": ["tunn"] if geo["hojd_andel"] < MIN_HEIGHT_RATIO else []}
     tag = ""
     if facit:
         rec["facit"] = facit
@@ -297,26 +352,42 @@ def handle_barcode(res, color, depth, products, log, now, mode="1080p", facit=No
             stats["right" if rec["correct"] else "wrong"] += 1
             stats["px_right" if rec["correct"] else "px_wrong"].append(geo["px_per_modul"])
 
+    def done():
+        if stats is not None and ean:
+            count_filters(stats, rec)
+        write_log(log, rec)
+
     if not ean:
         rec.update(in_map=False, distance_m=None, depth_how="ogiltig streckkod")
-        write_log(log, rec)
+        done()
         return
 
     d, how = depth_at(depth, color.shape, (res.position.top_left, res.position.top_right,
                                            res.position.bottom_right, res.position.bottom_left))
     rec["in_map"] = ean in products
     rec["depth_how"] = how
+    rec["distance_m"] = round(d, 3) if d is not None else None
+    if d is not None and not depth_plausible(d, expected):
+        rec["filter"].append("orimligt djup")
     px = f"{geo['px_per_modul']:.1f} px/modul"
-    if d is None:
-        rec["distance_m"] = None
-        print(f"[{ean}] Hittad, men inget djup, {px}: {how}{tag}")
-        write_log(log, rec)
+    why = ", ".join(FILTER_TEXT[r] for r in rec["filter"])
+    dist = f"{d:.2f} m (väntat ~{expected:.2f})" if d is not None and expected else "inget djup"
+
+    if use_filter and rec["filter"]:
+        print(f"[{ean}] ⛔ avvisad: {why}, {dist}, {px}{tag}")
+        done()
         return
-    rec["distance_m"] = round(d, 3)
+    if rec["filter"]:
+        tag += f"  [filter: {why}]"
+
+    if d is None:
+        print(f"[{ean}] Hittad, men inget djup, {px}: {how}{tag}")
+        done()
+        return
 
     if ean not in products:
         print(f"\n[OKÄND VARA] {ean}, {d:.2f} m bort, {px} (finns inte i kartan){tag}")
-        write_log(log, rec)
+        done()
         return
 
     cands = products[ean]
@@ -334,7 +405,7 @@ def handle_barcode(res, color, depth, products, log, now, mode="1080p", facit=No
         print(f"   ⚠️  Tvetydigt: varan finns på {len(positions)} platser")
 
     rec.update(namn=cands[0]["namn"], candidates=positions, ambiguous=ambiguous)
-    write_log(log, rec)
+    done()
 
 
 def median_min(values, decimals=2):
@@ -344,7 +415,7 @@ def median_min(values, decimals=2):
     return f"median {v[len(v) // 2]:.{decimals}f}, min {v[0]:.{decimals}f}, max {v[-1]:.{decimals}f}"
 
 
-def print_summary(mode, facit, stats, log_path):
+def print_summary(mode, facit, stats, log_path, use_filter=False):
     print(f"\nSammanfattning ({mode}): {stats['reads']} avläsningar. Logg: {log_path}")
     tries = stats["tries"]
     if tries:
@@ -360,6 +431,16 @@ def print_summary(mode, facit, stats, log_path):
         print(f"  Linsposition, alla bildrutor:        {median_min(stats['lens_all'], 0)}")
         if stats.get("lens_hit"):
             print(f"  Linsposition, bildrutor med rätt kod: {median_min(stats['lens_hit'], 0)}")
+    print(f"  Filter ({'PÅ, avvisade' if use_filter else 'AV, bara loggat'}):")
+    if not stats["filtered"]:
+        print("    inga läsningar fångades")
+    for reason, f in stats["filtered"].items():
+        line = f"    {FILTER_TEXT[reason]}: {f['n']} läsningar"
+        if facit:
+            line += f" ({f['right']} rätt kod, {f['wrong']} fel kod)"
+        print(line)
+    if facit:
+        print(f"  Efter filter: {stats['kept_right']} rätt, {stats['kept_wrong']} fel")
 
 
 def diagnose(color, results, n_saved, folder, meta=None):
@@ -396,6 +477,8 @@ def main():
                     help="lås linsen på position N (0-255) i stället för autofokus")
     ap.add_argument("--facit", metavar="EAN",
                     help="rätt streckkod i testet: loggar varje läsning som rätt/fel och märker felläsningar")
+    ap.add_argument("--filter", action="store_true",
+                    help="avvisa tunna remsor och orimligt djup (utan flaggan loggas det bara)")
     args = ap.parse_args()
     if args.fokus is not None and not 0 <= args.fokus <= 255:
         sys.exit(f"❌ --fokus {args.fokus} är utanför 0-255")
@@ -413,7 +496,8 @@ def main():
     os.makedirs("logs", exist_ok=True)
     log_path = f"logs/scan_{time.strftime('%Y%m%d_%H%M%S')}_{mode}.jsonl"
     stats = {"reads": 0, "right": 0, "wrong": 0, "px_right": [], "px_wrong": [],
-             "tries": 0, "hit_frames": 0, "right_frames": 0, "lens_all": [], "lens_hit": []}
+             "tries": 0, "hit_frames": 0, "right_frames": 0, "lens_all": [], "lens_hit": [],
+             "filtered": {}, "kept_right": 0, "kept_wrong": 0}
     if facit:
         print(f"Facit: {facit}. Felläsningar markeras.")
 
@@ -422,6 +506,7 @@ def main():
         usb = device.getUsbSpeed()
         print(f"Kamera: {'4K 3840x2160 @ ' + str(UHD_FPS) if args.uhd else '1080p @ ' + str(CAMERA_FPS)} fps, USB {usb.name}")
         print(f"Fokus: {'manuell, linsposition ' + str(args.fokus) if args.fokus is not None else 'autofokus'}")
+        print(f"Filter: {'PÅ (avvisar tunna remsor och orimligt djup)' if args.filter else 'AV (loggas och märks bara)'}")
         if args.uhd and usb not in (dai.UsbSpeed.SUPER, dai.UsbSpeed.SUPER_PLUS):
             print("⚠️  4K kräver USB3 (blå port). Med USB2 kan bilden hacka eller utebli.")
         q = device.getOutputQueue(name="out", maxSize=4, blocking=False)
@@ -447,7 +532,7 @@ def main():
                 depth = msg["depth"].getFrame()   # uint16, millimeter
                 results = zxingcpp.read_barcodes(color, formats=BARCODE_FORMATS)
                 for res in results:
-                    handle_barcode(res, color, depth, products, log, now, mode, facit, stats, meta)
+                    handle_barcode(res, color, depth, products, log, now, mode, facit, stats, meta, args.filter)
                 if now - started >= WARMUP_S:
                     stats["tries"] += 1
                     if "lins" in meta:
@@ -463,7 +548,7 @@ def main():
                     n_saved += 1
         except KeyboardInterrupt:
             print("\nAvslutar.")
-        print_summary(mode, facit, stats, log_path)
+        print_summary(mode, facit, stats, log_path, args.filter)
 
 
 if __name__ == "__main__":
