@@ -1,6 +1,6 @@
 # HANDOFF: Vision-5 (till nästa agent)
 
-Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätserien (avsnitt 3, 4, 6, 7 och 10). Avsnitt 7 reviderades därefter efter en genomgång med Elias (ny ordning, ingen deadlinepress). **Uppdaterad 2026-10-27** efter fokustesterna 18 och 20/10 och filtertestet 27/10 (avsnitt 0, 5, 6, 7, 9, 10 och nytt avsnitt 11 med arbetsloggarna som PDF i `docs/`). Läs hela filen innan du gör något. Den beskriver vad projektet är, vad som är gjort, hur säkra vi är på varje resultat, vad som är på gång och **varför**. Filen innehåller medvetet inga rumsmått, koordinater, foton eller personnamn: repot är publikt.
+Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätserien (avsnitt 3, 4, 6, 7 och 10). Avsnitt 7 reviderades därefter efter en genomgång med Elias (ny ordning, ingen deadlinepress). **Uppdaterad 2026-10-27** efter fokustesterna 18 och 20/10 och filtertestet 27/10 (avsnitt 0, 5, 6, 7, 9, 10 och nytt avsnitt 11 med arbetsloggarna som PDF i `docs/`). **Uppdaterad 2026-10-29** efter första varutestet (kaffefilter): avsnitt 6, 7, 10 och 11. Läs hela filen innan du gör något. Den beskriver vad projektet är, vad som är gjort, hur säkra vi är på varje resultat, vad som är på gång och **varför**. Filen innehåller medvetet inga rumsmått, koordinater, foton eller personnamn: repot är publikt.
 
 ---
 
@@ -21,7 +21,7 @@ Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätseri
 - **Elias tar emot kodgranskning av andras kod** (ofta skriven av en annan AI-agent). Elias har gett tillåtelse att ändra kod om du tycker den är dålig, så länge du säger vad du ändrat och förklarar felet.
 - **Måttband i tum.** Elias mäter i tum. Räkna om (tum × 2,54 = cm) i alla instruktioner.
 - **Skriv inte i HANDOFF.md på eget initiativ** (Elias, 17/10). Uppdatera när Elias ber om det.
-- **Arbetsloggar som PDF** efter testdagar ska läggas i `docs/` och listas i avsnitt 11 (Elias, 27/10). Aldrig foton från rummet, koordinater eller butiksnamn i dem: repot är publikt.
+- **Arbetsloggar som PDF** efter testdagar ska läggas i `docs/` och listas i avsnitt 11, **nyaste överst** (Elias, 27 och 29/10). Aldrig foton från rummet, koordinater eller butiksnamn i dem: repot är publikt.
 - **Checklistor med numrerade steg (☐ 0, 1, 2 …)** fungerar bra för Elias när tester ska köras.
 
 ### Säkerhetsregler (hårda)
@@ -201,6 +201,9 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 | **Felaktigt djup (3–13 m)** kommer bara inom ~1,2 s från första läsningen, och bara med låst lins (läsning direkt vid start). 15 av 1 459 läsningar. Från både "mitten" (9) och "kodens yta" (6) | Uppmätt |
 | **Höjdfiltret** (höjd/bredd < 15 %) stoppar 60 av 62 gamla felläsningar (30 av 32 utan 17/10 14:09), men **vid pixelgränsen är även rätta läsningar 1 px höga**: det kastade 33 av 35 rätta på 0,22 m / 2,29 px/modul. Höjden mäter osäkerhet, inte rätt/fel | Uppmätt |
 | **Bara ~hälften av kamerans bilder når Pi:n:** 1080p 7,5 av 14,5/s, 4K 2,7 av 4,8/s. Färg + djup ≈ 590 / 570 Mbit/s mot USB2:s 480 | Uppmätt; USB2 som orsak är beräknad |
+| **Den säkra zonen beror på varan (29/10).** Kaffefiltret (modul ~0,29 mm) läste stabilt först vid ≥ ~3 px/modul i 4K (≤ ~0,28 m); tomatpurén vid ~2. Ingen fast pixelgräns fungerar för alla varor | Uppmätt, två varor |
+| **Felband under den säkra zonen (29/10):** kaffefiltret 2,4–2,7 px/modul gav 22 felläsningar, alla `5317443006847` (fel i siffra 1, 4, 5). Längre bort läses inget, närmare läses rätt | Uppmätt |
+| **Felläsningar kan vara höga (29/10):** 4 av 22 var 52–92 px (20–36 % av bredden) och passerade höjdfiltret, som fångade 18 av 22. Höjdfiltret räcker inte ensamt: produktlista och en konfliktregel (två olika koder på samma ställe = osäkert) behövs | Uppmätt; konfliktregeln är ett förslag |
 | djup × px/modul ≈ 0,51–0,55 m (1080p) och ≈ 1,0 m (4K) för tomatpurén | Uppmätt, används i djupfiltret |
 
 **Tre tolkningar som drogs tillbaka (upprepa dem inte):** "ett fast linsvärde ~77 räcker för armlängd", "filtret kastar bara ~10 % av rätta, det märks knappt" (gäller inte vid gränsen), "en lägre höjdgräns stoppar fel utan rätta" (rätta kan också vara 1 px).
@@ -214,6 +217,8 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 ## 7. Det jag tänkte göra härnäst, och varför
 
 **Tidsram (2026-10-17):** exjobbet börjar först nästa termin, så det finns ingen deadline att stressa mot. En person kommer då att hjälpa Elias med koden. Prioritera därför att det som byggs nu är **förstått, repeterbart och dokumenterat** framför att hinna med många funktioner. Ordningen nedan reviderades efter en genomgång samma dag: punkt 2 är ny, positionstestet är flyttat fram och vinkel och djupkontroll är sammanslagna i punkt 5. Kodändringar föreslås först och görs när Elias säger ja.
+
+**Status 29/10:** varutesterna har börjat (tomatpuré och kaffefilter i 4K, se avsnitt 6 och `docs/Vision5_varutest_kaffefilter_2026-10-29.pdf`). Nästa: titta på kaffefiltrets kod (veck eller tryckfel i vänstra halvan?), testa burk och blank påse (börja nära, flytta 3 cm bakåt i taget, ~30 s per steg), och sedan ett kodförslag för **konfliktregel och "lite närmare" vid osäkerhet**. Resultaten gäller bästa fall (kameran rätt riktad); den riktiga användarfrågan besvaras med röstvägledning och test med ögonbindel.
 
 **Status 27/10:** punkt 1 (fokustestet) är gjord. Del A av kodförslaget (`docs/Vision5_forslag_kodandring_2026-10-20.pdf`) är genomförd i PR #11: höjd- och djupfilter som loggas och avvisar med `--filter`, `scan_filters.py`, `analyze_scans.py`. Ändrat efter granskning: vid orimligt eller saknat djup sägs varan utan position. Punkt 2–5 nedan är inte påbörjade. **Ny ordning härifrån:**
 1. **Beslut: ska en tunn läsning ge "lite närmare" i stället för tystnad?** *Varför:* höjdfiltret stoppar allt nära pixelgränsen, även rätta läsningar. Som signal behålls säkerheten utan att räckvidden går förlorad, och det är första biten av röstvägledningen. Förslag, inte beslutat.
@@ -303,7 +308,8 @@ Elias hämtar bilder genom att högerklicka i VS Code och välja **Download**. S
 
 ## 10. Öppna frågor till Elias
 - Ska en tunn läsning ge "lite närmare" i stället för tystnad (avsnitt 7, ny punkt 1)?
-- Finns en vara med kort streckkod att testa höjdfiltret på?
+- Finns en vara med kort streckkod att testa höjdfiltret på? (Skannern läser bara EAN-13/UPC-A, inte EAN-8.)
+- Har kaffefiltrets kod något veck eller tryckfel i vänstra halvan?
 - Har ICA-butiken svarat på mejlet?
 - Vad ska uppställningen heta när den blir standard (tejpmärken, stöd, bakgrund), så att resultaten går att upprepa?
 - Vilken butik/vilka butiker finns det tillgång till för att spana in etiketter?
@@ -317,11 +323,14 @@ Elias hämtar bilder genom att högerklicka i VS Code och välja **Download**. S
 
 ## 11. Arbetsloggar (PDF i `docs/`)
 
+Nyaste överst.
+
 | Fil | Innehåll |
 |---|---|
-| `docs/Vision5_fokustest_2026-10-18.pdf` | Fokustestet: 19 körningar, linsfönster per avstånd, fast lins mot autofokus, första felaktiga djupet, första tunna felläsningen. USB-raden rättad 20/10 |
-| `docs/Vision5_autofokus_hojdfilter_2026-10-20.pdf` | Autofokus och kodens placering (mitten 100 %, längst ner 0 %), lins 77 vid kanten, höjdfiltret på alla loggar |
-| `docs/Vision5_forslag_kodandring_2026-10-20.pdf` | Kodförslaget (del A filter, del B fokusstyrning) med testplan. Del A genomförd i PR #11, med ändringen att varan sägs utan position vid orimligt djup |
+| `docs/Vision5_varutest_kaffefilter_2026-10-29.pdf` | Första varutestet (4K): säker zon beror på varan, felband 2,4–2,7 px/modul, höga felläsningar passerar höjdfiltret, förslag på konfliktregel |
 | `docs/Vision5_filter_pa_pi_2026-10-27.pdf` | Filtren på Pi:n: höjden mäter osäkerhet, inte rätt/fel; djupet fel bara första sekunden; hälften av bilderna når Pi:n |
+| `docs/Vision5_forslag_kodandring_2026-10-20.pdf` | Kodförslaget (del A filter, del B fokusstyrning) med testplan. Del A genomförd i PR #11, med ändringen att varan sägs utan position vid orimligt djup |
+| `docs/Vision5_autofokus_hojdfilter_2026-10-20.pdf` | Autofokus och kodens placering (mitten 100 %, längst ner 0 %), lins 77 vid kanten, höjdfiltret på alla loggar |
+| `docs/Vision5_fokustest_2026-10-18.pdf` | Fokustestet: 19 körningar, linsfönster per avstånd, fast lins mot autofokus, första felaktiga djupet, första tunna felläsningen. USB-raden rättad 20/10 |
 
 **Inte i repot:** dagsljustestet 15/10 och mätserien 17/10 (gjorda av föregående agent). De innehåller foton från köket. Elias har egna kopior, och siffrorna från 17/10 står i avsnitt 4.
