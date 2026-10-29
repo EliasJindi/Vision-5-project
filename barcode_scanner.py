@@ -75,6 +75,12 @@
 #     och efter höjdfiltret.
 # 27. Sammanfattningen visar hur många bildrutor per sekund kameran levererade (mottagna, och enligt
 #     kamerans sekvensnummer). Skannerns egen gräns (3/s i 1080p, 2/s i 4K) säger inget om USB.
+# Runda 7 (2026-10-29, varutest): en Coca-Cola-flaska har EAN-8, som skannern inte läste.
+# 28. EAN-8 läses också. normalize_ean godtar 8 siffror (samma kontrollsumma som EAN-13 med nollor
+#     framför) och behåller dem som 8 siffror, även i --facit och kartan. px/modul räknas med 67
+#     moduler för EAN-8 i stället för 95 (scan_filters.modules_for), annars blir px/modul och djupfiltret
+#     fel. RISK att följa upp: zxing kan i sällsynta fall läsa en del av en EAN-13 som en EAN-8. Med
+#     --facit syns det som felläsningar med format EAN-8 på en vara med 13 siffror.
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
@@ -108,7 +114,7 @@ import depthai as dai
 import numpy as np
 import zxingcpp
 
-from scan_filters import FILTER_TEXT, MODULES, depth_plausible, expected_depth, is_thin, size_from_corners
+from scan_filters import FILTER_TEXT, depth_plausible, expected_depth, is_thin, modules_for, size_from_corners
 
 DEFAULT_MAP = "kartor/produkter.geojson"
 WARMUP_S = 10               # försök räknas först efter detta (autofokus och exponering ställer in sig)
@@ -125,20 +131,23 @@ ROI_HALF_PX = 15            # djupet tas som median i en ruta på 31x31 px runt 
 MIN_VALID_PX = 20           # minst så många giltiga djuppixlar för att lita på medianen
 DIAG_INTERVAL_S = 2.0      # --diag: en bild varannan sekund
 DIAG_MAX_IMAGES = 60       # --diag: sluta spara efter så många (skonar SD-kortet)
-BARCODE_FORMATS = (zxingcpp.BarcodeFormat.EAN13, zxingcpp.BarcodeFormat.UPCA)
+BARCODE_FORMATS = (zxingcpp.BarcodeFormat.EAN13, zxingcpp.BarcodeFormat.UPCA, zxingcpp.BarcodeFormat.EAN8)
 
 
 def normalize_ean(code):
     """
-    Returnerar en giltig 13-siffrig EAN, eller None.
+    Returnerar en giltig EAN, eller None.
     En 12-siffrig UPC-A (783935132243) blir EAN-13 med inledande nolla (0783935132243).
+    En EAN-8 (54036796) behålls som 8 siffror (ändring 28).
     """
     code = str(code).strip()
-    if not code.isdigit() or len(code) not in (12, 13):
+    if not code.isdigit() or len(code) not in (8, 12, 13):
         return None
-    code = code.zfill(13)
-    total = sum(int(code[i]) * (1 if i % 2 == 0 else 3) for i in range(12))
-    return code if (10 - total % 10) % 10 == int(code[12]) else None
+    full = code.zfill(13)   # nollor framför ändrar inte kontrollsumman, så samma regel gäller EAN-8
+    total = sum(int(full[i]) * (1 if i % 2 == 0 else 3) for i in range(12))
+    if (10 - total % 10) % 10 != int(full[12]):
+        return None
+    return code if len(code) == 8 else full
 
 
 def load_products(path):
@@ -270,7 +279,7 @@ def depth_at(depth_frame, color_shape, corners):
     return None, why
 
 
-def code_geometry(position, frame_shape):
+def code_geometry(position, frame_shape, modules=95):
     """
     Kodens mått i bilden, mätta längs läsriktningen (hörnpunkterna), inte i x-led.
     px_per_modul = pixlar per grundstreck. rot_deg är bara pålitlig för 0/90/180/270 grader.
@@ -283,7 +292,7 @@ def code_geometry(position, frame_shape):
         "w_px": round(width, 1),
         "h_px": round(height, 1),
         "hojd_andel": round(height / width, 3) if width else 0.0,
-        "px_per_modul": round(width / MODULES, 2),
+        "px_per_modul": round(width / modules, 2),
         "rot_deg": round(math.degrees(math.atan2(tr[1] - tl[1], tr[0] - tl[0])), 1),
         "hornen": [[round(x), round(y)] for x, y in (tl, tr, br, bl)],
         "bild": [frame_shape[1], frame_shape[0]],
@@ -328,7 +337,7 @@ def handle_barcode(res, color, depth, products, log, now, mode="1080p", facit=No
     Utan use_filter loggas och märks de bara. Returnerar loggraden.
     """
     ean = normalize_ean(res.text)
-    geo = code_geometry(res.position, color.shape)
+    geo = code_geometry(res.position, color.shape, modules_for(res.text))
     expected = expected_depth(geo["px_per_modul"], mode)
     rec = {"t": round(now, 3), "mode": mode, "raw": res.text, "ean": ean,
            "format": str(res.format), **geo, **(meta or {}),
@@ -495,7 +504,7 @@ def main():
     if args.facit:
         facit = normalize_ean(args.facit)
         if not facit:
-            sys.exit(f"❌ --facit {args.facit!r} är ingen giltig EAN-13/UPC-A (fel längd eller kontrollsiffra)")
+            sys.exit(f"❌ --facit {args.facit!r} är ingen giltig EAN-13/EAN-8/UPC-A (fel längd eller kontrollsiffra)")
     map_path = args.karta
     products = load_products(map_path)
     n_places = sum(len(v) for v in products.values())
