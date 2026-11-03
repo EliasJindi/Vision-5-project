@@ -1,6 +1,7 @@
 # ===================== NY FIL AV CLAUDE (2026-10-10) =====================
 # All formulering av varningar på ett ställe. DISTANCE_STYLE = "comma" (variant G)
 # valdes efter measure_phrases.py. EMERGENCY_LABELS används av filtret och cachen.
+# 2026-11-03: fraserna för röstvägledningen (voice_guidance/) ligger här också.
 # =========================================================================
 """
 phrases.py - Exakt hur varningar formuleras. Används av detect_spatial.py
@@ -31,6 +32,45 @@ def format_phrase(label, distance, style=DISTANCE_STYLE):
         words = _HALF_WORDS.get(half, f"{half:g} meter".replace('.', ','))
         return f"{name}. {words[0].upper() + words[1:]}."
     return f"{name}. {dec} meter."
+
+
+# ---------- Röstvägledning (voice_guidance/) ----------
+# Nycklarna är voice_guidance.model.ActionKind.value. Korta fraser: varje ord kostar tid.
+GUIDANCE_PHRASES = {
+    "closer": "Lite närmare.",
+    "hold_still": "Håll stilla.",
+    "unknown_product": "Okänd vara.",
+}
+# Riktning. Motorn säger var koden ligger i bilden, konventionen avgör orden:
+#   head: användaren vrider huvudet mot koden.  hand: användaren flyttar varan mot bildens mitt.
+AIM_PHRASES = {
+    "head": {"code_left": "Lite åt vänster.", "code_right": "Lite åt höger.",
+             "code_above": "Lite uppåt.", "code_below": "Lite nedåt."},
+    "hand": {"code_left": "Lite åt höger.", "code_right": "Lite åt vänster.",
+             "code_above": "Lite nedåt.", "code_below": "Lite uppåt."},
+}
+
+
+def guidance_text(kind, convention="head", name=None):
+    """Frasen för ett vägledningsbesked. 'confirmed' kräver ett varunamn."""
+    if kind == "confirmed":
+        if not name:
+            raise ValueError("'confirmed' kräver ett varunamn")
+        return f"{name[:1].upper()}{name[1:]}."
+    if kind in GUIDANCE_PHRASES:
+        return GUIDANCE_PHRASES[kind]
+    try:
+        return AIM_PHRASES[convention][kind]
+    except KeyError:
+        raise ValueError(f"okänt vägledningsbesked {kind!r} med konvention {convention!r}") from None
+
+
+def guidance_phrases():
+    """Alla fasta vägledningsfraser (båda konventionerna). Varunamn genereras när de behövs."""
+    phrases = set(GUIDANCE_PHRASES.values())
+    for aim in AIM_PHRASES.values():
+        phrases.update(aim.values())
+    return sorted(phrases)
 
 
 # Högprioriterade klasser (akutlarm). Används av DetectionFilter och för cachen.
