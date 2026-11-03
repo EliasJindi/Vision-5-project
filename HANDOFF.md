@@ -1,6 +1,6 @@
 # HANDOFF: Vision-5 (till nästa agent)
 
-Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätserien (avsnitt 3, 4, 6, 7 och 10). Avsnitt 7 reviderades därefter efter en genomgång med Elias (ny ordning, ingen deadlinepress). **Uppdaterad 2026-10-27** efter fokustesterna 18 och 20/10 och filtertestet 27/10 (avsnitt 0, 5, 6, 7, 9, 10 och nytt avsnitt 11 med arbetsloggarna som PDF i `docs/`). **Uppdaterad 2026-10-29** efter varutesterna (kaffefilter, Coca-Cola med EAN-8): avsnitt 3, 6, 7, 10 och 11. Läs hela filen innan du gör något. Den beskriver vad projektet är, vad som är gjort, hur säkra vi är på varje resultat, vad som är på gång och **varför**. Filen innehåller medvetet inga rumsmått, koordinater, foton eller personnamn: repot är publikt.
+Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätserien (avsnitt 3, 4, 6, 7 och 10). Avsnitt 7 reviderades därefter efter en genomgång med Elias (ny ordning, ingen deadlinepress). **Uppdaterad 2026-10-27** efter fokustesterna 18 och 20/10 och filtertestet 27/10 (avsnitt 0, 5, 6, 7, 9, 10 och nytt avsnitt 11 med arbetsloggarna som PDF i `docs/`). **Uppdaterad 2026-10-29** efter varutesterna (kaffefilter, Coca-Cola med EAN-8): avsnitt 3, 6, 7, 10 och 11. **Uppdaterad 2026-11-03** efter att röstvägledningen byggts (PR #16): avsnitt 1, 3, 7, 9, 10 och 11. Läs hela filen innan du gör något. Den beskriver vad projektet är, vad som är gjort, hur säkra vi är på varje resultat, vad som är på gång och **varför**. Filen innehåller medvetet inga rumsmått, koordinater, foton eller personnamn: repot är publikt.
 
 ---
 
@@ -61,12 +61,17 @@ Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätseri
 |---|---|
 | `detect_spatial.py` | Huvudloop: YOLO + djup på kameran, akutlarm, Gemini-knapp |
 | `audio_manager.py` | Prioritetskö för ljud (TTL per nivå, akutlarm avbryter, minst 0,7 s uppspelning först) |
-| `tts_engine.py` | Piper som en process (`--json-input`), WAV-cache i `cache/tts/`, låst till kärna 2–3. `--prewarm` genererar 241 fraser |
-| `phrases.py` | Fraser och avståndsformat (stil G: "Bil, 0,6 meter.") |
+| `tts_engine.py` | Piper som en process (`--json-input`), WAV-cache i `cache/tts/`, låst till kärna 2–3. `--prewarm` genererar 248 fraser (241 akut + 7 vägledning) |
+| `phrases.py` | Fraser och avståndsformat (stil G: "Bil, 0,6 meter."), och röstvägledningens fraser |
 | `gemini_service.py` | Anrop till Gemini, timeout 10 s via `HttpOptions` (millisekunder) |
 | `telemetry_logger.py`, `analyze_telemetry.py` | Spänning (`EXT5V_V`), `throttled`, temperatur, ljudkö; analys av latens m.m. |
 | `measure_phrases.py` | Mätverktyg för fraslängd |
 | `barcode_scanner.py` | **Rumstestet:** streckkod → karta → position. Se avsnitt 3–4 |
+| `scan_filters.py` | Höjd- och djupfilter och modulantal (EAN-13/UPC-A 95, EAN-8 67). Bara standardbiblioteket, delas av skannern och analysen |
+| `analyze_scans.py` | Utvärderar filtren på `logs/scan_*.jsonl`. Går utan kameran |
+| `voice_guidance/` | **Röstvägledning** (3/11): `engine.py` (beslutslogik), `voice.py`, `link.py` (JSON-länk för t.ex. C#), `session.py`, `replay.py`. Se `docs/ROSTVAGLEDNING.md` |
+| `tests/` | 99 enhetstester: `python3 -m unittest discover -s tests -t .` |
+| `docs/` | Arbetsloggar (PDF) och `ROSTVAGLEDNING.md`. Se avsnitt 11 |
 | `test_cam.py` | Gammal kameratest |
 
 **Inte i repot (finns bara på Pi:n):** `kartor/produkter.geojson`, `kartor/mobler.geojson`, `.env`, `logs/`, `cache/`, Piper-modellen.
@@ -100,7 +105,7 @@ Mycket gick åt till att göra systemet stabilt och snabbt.
 **QGIS-fällor:** sök bara på "3006" (ett tankstreck i "EPSG:3006 – SWEREF99 TM" bröt sökningen). Avbocka "Detektera fälttyper" vid CSV-import så att inledande nollor i EAN behålls. Exportera GeoJSON med RFC7946=NO så att koordinaterna stannar i EPSG:3006.
 
 ### `barcode_scanner.py`
-Startade som ett utkast från en annan AI-agent. Granskad och rättad. Filhuvudet har numrerade ändringar 1–28 (20–27: filter och sammanfattning, PR #11; 28: EAN-8, PR #14). I korthet:
+Startade som ett utkast från en annan AI-agent. Granskad och rättad. Filhuvudet har numrerade ändringar 1–31 (20–27: filter och sammanfattning, PR #11; 28: EAN-8, PR #14; 29–31: röstvägledning, länk och tester, PR #16). I korthet:
 - Rättade krascher (`time.timedelta`, `msg.get` på en MessageGroup) och en begränsning av skanningstakten som bara gällde efter en träff (30 avkodningar/s = strömproblem).
 - **Extended disparity** så att djup finns ner till ~0,20 m (annars ~0,35 m). **Reservruta** för djup runt kodens yta.
 - `--diag`: sparar en bild varannan sekund i `logs/snapshots/` (max 60) med ljus- och skärpevärde, och grön ram runt funna koder.
@@ -220,7 +225,16 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 
 **Tidsram (2026-10-17):** exjobbet börjar först nästa termin, så det finns ingen deadline att stressa mot. En person kommer då att hjälpa Elias med koden. Prioritera därför att det som byggs nu är **förstått, repeterbart och dokumenterat** framför att hinna med många funktioner. Ordningen nedan reviderades efter en genomgång samma dag: punkt 2 är ny, positionstestet är flyttat fram och vinkel och djupkontroll är sammanslagna i punkt 5. Kodändringar föreslås först och görs när Elias säger ja.
 
-**Status 29/10:** varutester gjorda för tomatpuré, kaffefilter och Coca-Cola (EAN-8) i 4K, se avsnitt 6 och de två PDF:erna från 29/10. Del 2 rättar flera slutsatser från del 1. EAN-8 inlagt (PR #14). **Nästa: röstvägledning.** Först ett skriftligt förslag som Elias godkänner: "lite närmare" vid tunna läsningar, riktning (vänster/höger/upp/ner) utifrån var koden sitter i bilden, "håll stilla" vid konflikt mellan två koder, och pip + varans namn vid säker läsning. Därefter test med ögonbindel. Burk och blank påse kan vänta. Resultaten gäller bästa fall (kameran rätt riktad); den riktiga användarfrågan besvaras med röstvägledning och test med ögonbindel.
+**Status 3/11: röstvägledningen är byggd (PR #16) men inte körd på Pi:n.** Paketet `voice_guidance/`, `--vagledning text|tal`, `--sikte huvud|hand`, `--lank PORT` och 99 enhetstester. Regler, protokoll och kända begränsningar: `docs/ROSTVAGLEDNING.md`. Arbetslogg: `docs/Vision5_rostvagledning_2026-11-03.pdf`. **Nästa steg, i ordning:**
+1. **`python3 -m voice_guidance.replay logs/scan_*.jsonl --karta kartor/produkter.geojson`** på Pi:n. Visar vad motorn hade sagt under alla gamla körningar och **hur ofta den hade sagt fel vara** (ska vara 0, annars justeras reglerna innan något testas med röst). Skicka utskriften till Claude.
+2. `python3 tts_engine.py --prewarm` (utan kameran igång), sedan `--vagledning text` och sist `--vagledning tal`. Lyssna om beskeden stämmer med det som händer.
+3. **Justera trösklarna** (`GuidanceConfig`), särskilt `conflict_radius` (0,10, gissad: grannvaror på en hylla kan räknas som konflikt) och riktningskonventionen.
+4. **Test med ögonbindel**: den enda sanna testen av om vägledningen fungerar för någon som inte ser. Alla resultat hittills gäller bästa fall (kameran rätt riktad).
+5. Fokuslås (B1), fokusområde på koden (B2), pip, burk och blank påse, USB3-test.
+
+**Arkitekturbeslut 3/11 (Elias): "mellanvägen".** Python äger kameran, avkodningen och filtren (uppmätta med zxing-cpp, en annan avkodare ger andra gränser) och allt som rör säkerhet. Applikationslogiken (vad som sägs och när) kan senare flyttas till C# via länken (`--lank`, JSON-rader på localhost), eftersom den senior konsult som hjälper Elias i exjobbet kan C# bäst. Pythons `GuidanceEngine`, `tests/test_engine.py` och `replay.py` är då specifikationen. Ingen omskrivning görs nu. **Skriv inte om det uppmätta i C#.**
+
+**Status 29/10:** varutester gjorda för tomatpuré, kaffefilter och Coca-Cola (EAN-8) i 4K, se avsnitt 6 och de två PDF:erna från 29/10. Del 2 rättar flera slutsatser från del 1. EAN-8 inlagt (PR #14). Röstvägledningen föreslogs här och byggdes 3/11 (se ovan). Resultaten gäller bästa fall (kameran rätt riktad).
 
 **Status 27/10:** punkt 1 (fokustestet) är gjord. Del A av kodförslaget (`docs/Vision5_forslag_kodandring_2026-10-20.pdf`) är genomförd i PR #11: höjd- och djupfilter som loggas och avvisar med `--filter`, `scan_filters.py`, `analyze_scans.py`. Ändrat efter granskning: vid orimligt eller saknat djup sägs varan utan position. Punkt 2–5 nedan är inte påbörjade. **Ny ordning härifrån:**
 1. **Beslut: ska en tunn läsning ge "lite närmare" i stället för tystnad?** *Varför:* höjdfiltret stoppar allt nära pixelgränsen, även rätta läsningar. Som signal behålls säkerheten utan att räckvidden går förlorad, och det är första biten av röstvägledningen. Förslag, inte beslutat.
@@ -239,7 +253,7 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
    - Felkoderna ligger 1–3 siffror från rätt kod. Närliggande koder hos samma tillverkare kan vara riktiga produkter, så en produktlista skyddar troligen mindre än man tror (**resonemang, inte mätt**). Särskilt viktigt för allergener.
    - Ett förslag Elias har sett men inte beslutat: logga skärpa i just kodens ruta. Det flaggar inte enskilda fel (rätt och fel kom i samma bildruta), men förklarar träffprocent mellan uppställningar.
 5. **Mät vinkeln och kontrollera djupet mot måttband.** Mobilens vattenpass vid varje körning, och längre fram lutning ur djupet (vänster mot höger sida av koden). Djupet mot måttband på 0,3 / 0,5 / 1,0 / 1,5 m. *Varför:* vinkel/vridning är den enda variabel som passar alla körningar, och den är inte mätt. Stereofelet växer med avståndet i kvadrat, och skillnaden mot måttbandet växlade +0,7 till +3,1 cm utan mönster. Djupet skrivs bara ut när en kod läses, så avstånd bortom läsgränsen kräver en större testkod.
-6. **Röstvägledning för siktet** (Elias vill fundera extra på den, och tycker den är en bra funktion). Se nedan. *Varför:* löser sikteproblemet, som är designkrav för blinda användare.
+6. **Röstvägledning för siktet** (Elias vill fundera extra på den, och tycker den är en bra funktion). **Byggd 3/11, se status överst i avsnittet.** Designen nedan är den ursprungliga: den byggda versionen ligger i `docs/ROSTVAGLEDNING.md`. *Varför:* löser sikteproblemet, som är designkrav för blinda användare.
 7. **Knappskanning** (USB-knapp via `evdev`, systemd): kameran sitter på pannband och följer huvudet. Skanna några sekunder vid tryck. *Varför:* mindre ström, inga oönskade avläsningar, passar att användaren "tittar" på varan.
 8. **Gemini som reserv** när ingen kod syns eller den är osäker (produktigenkänning, "koden sitter på baksidan, vänd paketet"). *Varför:* skalar till hundratals produkter utan att träna egna modeller.
 9. **Hyllkantsetiketter**, **integration** med `detect_spatial.py` (en kamera, säkerhetslarmen först, position på nivå 3 i ljudkön), eventuell **AI-agent** med verktyg (`ta_bild`, `läs_streckkod`, `slå_upp_i_kartan`, `säg`; aldrig säkerhet), sist en **genomgång** för att göra allt så robust som möjligt.
@@ -293,6 +307,11 @@ python3 barcode_scanner.py --diag --facit 7340083497834 --fokus 85    # låst li
 python3 barcode_scanner.py --diag --facit 7340083497834 --filter      # filtren avvisar (utan --filter loggas de bara)
 python3 analyze_scans.py                                        # höjdregler och orimligt djup i alla loggar (går utan kameran)
 python3 analyze_scans.py logs/scan_20261027_*.jsonl --utan 140916   # vissa loggar, utan en körning
+python3 -m unittest discover -s tests -t .                      # enhetstesterna (~100, ~2 s)
+python3 -m voice_guidance.replay logs/scan_*.jsonl --karta kartor/produkter.geojson   # vad hade vägledningen sagt? Felkod 1 om någon bekräftelse var fel
+python3 barcode_scanner.py --diag --4k --facit <EAN> --vagledning text   # röstvägledning, bara utskrift
+python3 barcode_scanner.py --diag --4k --facit <EAN> --vagledning tal --sikte huvud   # med röst (kör tts_engine.py --prewarm först)
+python3 barcode_scanner.py --lank 5555                          # JSON-länk på 127.0.0.1:5555 för andra program (se docs/ROSTVAGLEDNING.md)
 vcgencmd get_throttled; vcgencmd pmic_read_adc EXT5V_V          # ström
 lsusb -t                                                        # USB3 (5000M) eller USB2 (480M)
 python3 tts_engine.py --prewarm                                 # förgenerera tal (inte samtidigt som detect_spatial.py)
@@ -309,7 +328,11 @@ Elias hämtar bilder genom att högerklicka i VS Code och välja **Download**. S
 ---
 
 ## 10. Öppna frågor till Elias
-- Ska en tunn läsning ge "lite närmare" i stället för tystnad (avsnitt 7, ny punkt 1)?
+- Riktningskonventionen: `--sikte huvud` (vrid huvudet mot koden, standard) eller `hand` (flytta varan)? Välj **en**.
+- Vad visade `voice_guidance.replay` på de gamla loggarna? Hur många bekräftelser, och hur många fel vara (ska vara 0)?
+- Stämmer beskeden med det som händer när du lyssnar (`--vagledning tal`)? Låter något för ofta, för sällan eller för sent?
+- Grannvaror på en hylla: räknas två produkter nära varandra som konflikt (`conflict_radius`)? Testas i butiken.
+- ~~Ska en tunn läsning ge "lite närmare" i stället för tystnad~~ Beslutat och byggt 3/11.
 - Finns en vara med kort streckkod (13 siffror, korta streck) att testa höjdfiltret på? EAN-8 läses sedan ändring 28.
 - Har ICA-butiken svarat på mejlet?
 - Vad ska uppställningen heta när den blir standard (tejpmärken, stöd, bakgrund), så att resultaten går att upprepa?
@@ -328,11 +351,14 @@ Nyaste överst.
 
 | Fil | Innehåll |
 |---|---|
+| `docs/Vision5_rostvagledning_2026-11-03.pdf` | Arbetslogg: vad som byggdes och varför, arkitekturen, hur det är testat (99 tester, mutationskontroll), vad som inte är testat, nästa steg |
 | `docs/Vision5_varutest_del2_2026-10-29.pdf` | Varutest del 2 (4K): Coca-Cola med EAN-8 läser till 0,71 m, kaffefiltret rakt och stabilt ger inga fel. **Rättar flera slutsatser i del 1** |
 | `docs/Vision5_varutest_kaffefilter_2026-10-29.pdf` | Varutest del 1 (4K): kaffefilter med 22 felläsningar i en lutande, instabil uppställning, förslag på konfliktregel. Läs med rättelserna i del 2 |
 | `docs/Vision5_filter_pa_pi_2026-10-27.pdf` | Filtren på Pi:n: höjden mäter osäkerhet, inte rätt/fel; djupet fel bara första sekunden; hälften av bilderna når Pi:n |
 | `docs/Vision5_forslag_kodandring_2026-10-20.pdf` | Kodförslaget (del A filter, del B fokusstyrning) med testplan. Del A genomförd i PR #11, med ändringen att varan sägs utan position vid orimligt djup |
 | `docs/Vision5_autofokus_hojdfilter_2026-10-20.pdf` | Autofokus och kodens placering (mitten 100 %, längst ner 0 %), lins 77 vid kanten, höjdfiltret på alla loggar |
 | `docs/Vision5_fokustest_2026-10-18.pdf` | Fokustestet: 19 körningar, linsfönster per avstånd, fast lins mot autofokus, första felaktiga djupet, första tunna felläsningen. USB-raden rättad 20/10 |
+
+**Referens, inte en arbetslogg:** `docs/ROSTVAGLEDNING.md`. Röstvägledningens regler, trösklar, länkprotokollet (JSON-rader, kommandot `say`) och kända begränsningar. Läs den före `voice_guidance/`
 
 **Inte i repot:** dagsljustestet 15/10 och mätserien 17/10 (gjorda av föregående agent). De innehåller foton från köket. Elias har egna kopior, och siffrorna från 17/10 står i avsnitt 4.
