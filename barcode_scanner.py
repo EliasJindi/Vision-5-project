@@ -81,6 +81,15 @@
 #     moduler för EAN-8 i stället för 95 (scan_filters.modules_for), annars blir px/modul och djupfiltret
 #     fel. RISK att följa upp: zxing kan i sällsynta fall läsa en del av en EAN-13 som en EAN-8. Med
 #     --facit syns det som felläsningar med format EAN-8 på en vara med 13 siffror.
+# Runda 8 (2026-11-03): röstvägledning och länk till andra program, i paketet voice_guidance/.
+# 29. --vagledning text|tal: motorn (voice_guidance.GuidanceEngine) får varje avkodad bildruta och
+#     säger "lite närmare", riktning eller "håll stilla" när koden är osäker, och varans namn när
+#     den lästs säkert. "tal" läser upp via audio_manager.py på nivå 3 (aldrig före akutlarm).
+#     --sikte väljer riktningsorden (huvud/hand). Motorn bygger på samma loggrader som filen skriver.
+# 30. --lank PORT: öppnar en JSON-länk på localhost (läsningar och vägledning ut, say-kommandon in)
+#     så att t.ex. en C#-tjänst kan bygga applikationslogiken ovanpå. Protokoll: docs/ROSTVAGLEDNING.md.
+# 31. Enhetstester i tests/ (python3 -m unittest discover -s tests -t .). Uppspelning mot gamla loggar:
+#     python3 -m voice_guidance.replay logs/scan_*.jsonl
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
@@ -99,6 +108,9 @@ Kör:     python3 barcode_scanner.py [kartor/produkter.geojson] [--diag] [--4k] 
          --facit  rätt streckkod i testet, t.ex. 7340083497834: markerar felläsningar
          --fokus  låser linsen på position N (0-255), i stället för autofokus
          --filter avvisar tunna remsor, och ger ingen position vid orimligt djup (utan flaggan loggas det bara)
+         --vagledning text|tal  röstvägledning: skriv ut eller läs upp beskeden (voice_guidance/)
+         --sikte huvud|hand     riktningarna: vrid huvudet mot koden, eller flytta varan
+         --lank PORT            länk till andra program på 127.0.0.1:PORT (JSON-rader)
 Logg:    logs/scan_<datum>_<tid>_<4k|1080p>.jsonl (en rad per avläsning)
 """
 import argparse
@@ -115,6 +127,7 @@ import numpy as np
 import zxingcpp
 
 from scan_filters import FILTER_TEXT, depth_plausible, expected_depth, is_thin, modules_for, size_from_corners
+from voice_guidance import AimConvention, GuidanceMode, create_session
 
 DEFAULT_MAP = "kartor/produkter.geojson"
 WARMUP_S = 10               # försök räknas först efter detta (autofokus och exponering ställer in sig)
@@ -132,6 +145,7 @@ MIN_VALID_PX = 20           # minst så många giltiga djuppixlar för att lita 
 DIAG_INTERVAL_S = 2.0      # --diag: en bild varannan sekund
 DIAG_MAX_IMAGES = 60       # --diag: sluta spara efter så många (skonar SD-kortet)
 BARCODE_FORMATS = (zxingcpp.BarcodeFormat.EAN13, zxingcpp.BarcodeFormat.UPCA, zxingcpp.BarcodeFormat.EAN8)
+GUIDANCE_MODES = {None: GuidanceMode.OFF, "text": GuidanceMode.TEXT, "tal": GuidanceMode.VOICE}
 
 
 def normalize_ean(code):
@@ -497,9 +511,17 @@ def main():
                     help="rätt streckkod i testet: loggar varje läsning som rätt/fel och märker felläsningar")
     ap.add_argument("--filter", action="store_true",
                     help="avvisa tunna remsor, ingen position vid orimligt djup (utan flaggan loggas det bara)")
+    ap.add_argument("--vagledning", choices=("text", "tal"),
+                    help="röstvägledning: text = skriv ut beskeden, tal = läs upp dem (docs/ROSTVAGLEDNING.md)")
+    ap.add_argument("--sikte", choices=("huvud", "hand"), default="huvud",
+                    help="vägledningens riktningar: huvud = vrid huvudet mot koden, hand = flytta varan")
+    ap.add_argument("--lank", type=int, metavar="PORT",
+                    help="öppna en länk på 127.0.0.1:PORT för andra program (JSON-rader). 0 = välj ledig port")
     args = ap.parse_args()
     if args.fokus is not None and not 0 <= args.fokus <= 255:
         sys.exit(f"❌ --fokus {args.fokus} är utanför 0-255")
+    if args.lank is not None and not 0 <= args.lank <= 65535:
+        sys.exit(f"❌ --lank {args.lank} är ingen giltig port (0-65535)")
     facit = None
     if args.facit:
         facit = normalize_ean(args.facit)
@@ -523,6 +545,11 @@ def main():
     scan_interval = UHD_SCAN_INTERVAL_S if args.uhd else SCAN_INTERVAL_S
     stats["fps_set"] = UHD_FPS if args.uhd else CAMERA_FPS
     stats["scan_max"] = 1 / scan_interval
+    try:
+        session = create_session(products, GUIDANCE_MODES[args.vagledning],
+                                 AimConvention.HEAD if args.sikte == "huvud" else AimConvention.HAND, args.lank)
+    except OSError as e:   # t.ex. porten är upptagen
+        sys.exit(f"❌ Kunde inte öppna länken på port {args.lank}: {e}")
     with dai.Device(build_pipeline(uhd=args.uhd, focus=args.fokus)) as device, open(log_path, "a", encoding="utf-8") as log:
         usb = device.getUsbSpeed()
         print(f"Kamera: {'4K 3840x2160 @ ' + str(UHD_FPS) if args.uhd else '1080p @ ' + str(CAMERA_FPS)} fps, USB {usb.name}")
@@ -564,6 +591,7 @@ def main():
                 results = zxingcpp.read_barcodes(color, formats=BARCODE_FORMATS)
                 recs = [handle_barcode(res, color, depth, products, log, now, mode, facit, stats, meta, args.filter)
                         for res in results]
+                session.on_frame(now, recs)   # röstvägledning och länk (ändring 29-31), även utan läsning
                 if now - started >= WARMUP_S:
                     stats["right_frames_kept"] += any(r.get("correct") and "tunn" not in r["filter"] for r in recs)
                     stats["tries"] += 1
@@ -580,6 +608,8 @@ def main():
                     n_saved += 1
         except KeyboardInterrupt:
             print("\nAvslutar.")
+        finally:
+            session.close()
         print_summary(mode, facit, stats, log_path, args.filter)
 
 

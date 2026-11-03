@@ -2,6 +2,7 @@
 # Piper körs som EN process (--json-input) och färdiga fraser sparas i cache/tts/.
 # PIPER_CPUS begränsar Piper till 2 kärnor (Pi:n dog av strömbrist med alla 4).
 # Kör "python3 tts_engine.py --prewarm" för att generera akutfraserna i förväg.
+# 2026-11-03: --prewarm genererar även de fasta fraserna för röstvägledningen (phrases.guidance_phrases).
 # =========================================================================
 """
 tts_engine.py - Piper som körs hela tiden + cache av färdiga ljudfiler.
@@ -188,14 +189,14 @@ class TTSEngine:
 
 if __name__ == "__main__":
     import sys
-    from phrases import common_phrases
+    from phrases import common_phrases, guidance_phrases
 
     if "--prewarm" not in sys.argv:
-        print("Användning: python3 tts_engine.py --prewarm   (kör UTAN att detect_spatial.py är igång)")
+        print("Användning: python3 tts_engine.py --prewarm   (kör UTAN att detect_spatial.py eller barcode_scanner.py är igång)")
         sys.exit(0)
 
     engine = TTSEngine()
-    phrases = common_phrases()
+    phrases = sorted(set(common_phrases()) | set(guidance_phrases()))   # akutfraser + röstvägledning
     todo = engine.missing(phrases)
     print(f"{len(phrases) - len(todo)} av {len(phrases)} fraser finns redan. Genererar {len(todo)}...")
     t0 = time.time()
