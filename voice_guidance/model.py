@@ -31,6 +31,7 @@ class ActionKind(Enum):
     CODE_ABOVE = "code_above"
     CODE_BELOW = "code_below"
     HOLD_STILL = "hold_still"              # två olika koder från samma ställe: osäkert
+    NO_CODE = "no_code"                    # ingen kod har synts på ett tag: koden sitter troligen på en annan sida
 
 
 class AimConvention(Enum):

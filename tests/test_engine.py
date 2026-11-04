@@ -197,12 +197,53 @@ class ConflictTest(unittest.TestCase):
         self.assertIsNone(engine.update(frame(8.0, read(EAN_A))))                 # skulle ha varit röst 3
 
 
+class NoCodeTest(unittest.TestCase):
+    def setUp(self):
+        self.engine = GuidanceEngine(CATALOG)
+
+    def run_empty(self, start, end, step=0.5):
+        """Bildrutor utan kod. Returnerar (tid, slag) för varje besked."""
+        said = []
+        t = start
+        while t <= end:
+            action = self.engine.update(frame(t))
+            if action:
+                said.append((t, action.kind))
+            t += step
+        return said
+
+    def test_says_no_code_after_eight_seconds_and_once_more_then_stops(self):
+        self.assertEqual(self.run_empty(0.0, 60.0), [(8.0, ActionKind.NO_CODE), (18.0, ActionKind.NO_CODE)])
+
+    def test_a_code_starts_a_new_search(self):
+        self.run_empty(0.0, 30.0)                                   # två gånger, sedan tyst
+        self.assertEqual(self.engine.update(frame(31.0, read(thin=True))).kind, ActionKind.CLOSER)
+        self.assertEqual(self.run_empty(31.5, 40.0), [(39.0, ActionKind.NO_CODE)])   # 8 s efter koden
+
+    def test_no_prompt_after_a_successful_scan(self):
+        self.engine.update(frame(0.0, read()))
+        self.engine.update(frame(0.5, read()))                      # bekräftad
+        self.engine.update(frame(1.0, read()))                      # varan syns fortfarande en stund
+        self.assertEqual(self.run_empty(1.5, 60.0), [])             # varan lagd åt sidan: ingen tjat
+
+    def test_a_new_product_after_a_successful_scan_rearms_the_prompt(self):
+        self.engine.update(frame(0.0, read()))
+        self.engine.update(frame(0.5, read()))                      # tomatpurén bekräftad
+        self.engine.update(frame(20.0, read(EAN_B, thin=True)))     # en annan vara dyker upp, osäker
+        self.assertEqual(self.run_empty(20.5, 30.0), [(28.0, ActionKind.NO_CODE)])
+
+    def test_zero_disables_the_prompt(self):
+        engine = GuidanceEngine(CATALOG, GuidanceConfig(no_code_max=0))
+        self.assertTrue(all(engine.update(frame(t)) is None for t in range(0, 60)))
+
+
 class ConfigTest(unittest.TestCase):
     def test_defaults_are_valid(self):
         self.assertEqual(GuidanceConfig().confirm_reads, 2)
 
     def test_invalid_values_are_rejected(self):
         for bad in ({"confirm_reads": 0}, {"confirm_window_s": 0}, {"min_interval_s": -1}, {"conflict_escalate_s": 0},
+                    {"no_code_after_s": 0}, {"no_code_repeat_s": -1}, {"no_code_max": -1},
                     {"deadzone_x": 0}, {"deadzone_y": 0.6}, {"conflict_radius": 0}):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
