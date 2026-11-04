@@ -60,6 +60,12 @@ class BuildConfigTest(unittest.TestCase):
         self.assertEqual((config.lost_after_s, config.confirm_reads), (8.0, 3))
         self.assertEqual(config.min_interval_s, GuidanceConfig().min_interval_s)
 
+    def test_yes_no_values_are_parsed_as_words_not_by_python_truthiness(self):
+        for raw, expected in (("false", False), ("nej", False), ("0", False), ("true", True), ("ja", True)):
+            self.assertIs(build_config([f"conflict_from_thin={raw}"]).conflict_from_thin, expected, raw)
+        with self.assertRaises(SystemExit):
+            build_config(["conflict_from_thin=kanske"])
+
     def test_no_overrides_gives_the_defaults(self):
         self.assertEqual(build_config([]), GuidanceConfig())
 

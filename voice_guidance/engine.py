@@ -41,6 +41,7 @@ class GuidanceConfig:
     conflict_radius: float = 0.10    # ...om de ligger så nära varandra (andel av bildens bredd/höjd)
     conflict_hold_s: float = 3.0     # tyst tid efter en konflikt
     conflict_escalate_s: float = 5.0   # varar en konflikt så länge byts "håll stilla" mot "lite närmare"
+    conflict_from_thin: bool = True    # får tunna läsningar starta en konflikt? (prövas med replay, 4/11)
     deadzone_x: float = 0.20         # koden räknas som "i mitten" så länge den ligger inom detta från mitten
     deadzone_y: float = 0.25
     min_interval_s: float = 1.8      # minst så här lång tid mellan två vägledningar
@@ -186,7 +187,8 @@ class GuidanceEngine:
             if read.ean is None:
                 continue
             self._last_seen[read.ean] = obs.t
-            self._recent.append((obs.t, read.ean, read.center))
+            if read.reliable or self._cfg.conflict_from_thin:
+                self._recent.append((obs.t, read.ean, read.center))
             if read.reliable:
                 self._votes.setdefault(read.ean, deque()).append(obs.t)
 
