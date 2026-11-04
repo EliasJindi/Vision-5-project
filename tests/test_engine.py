@@ -188,6 +188,22 @@ class ConflictTest(unittest.TestCase):
         self.engine.update(frame(0.5, read(EAN_A)))                              # bekräftad
         self.assertIsNone(self.engine.update(frame(1.0, read(EAN_B, x=0.52, thin=True))))
 
+    def test_thin_reads_can_be_kept_out_of_conflicts(self):
+        # Köksprovet 4/11: en tunn felläsning bredvid tomatpurén gav "håll stilla" och 4 s extra väntan.
+        thin_wrong = lambda engine: engine.update(frame(0.5, read(EAN_B, x=0.52, thin=True)))
+        default = GuidanceEngine(CATALOG)
+        default.update(frame(0.0, read(EAN_A)))
+        self.assertEqual(thin_wrong(default).kind, ActionKind.HOLD_STILL)
+        relaxed = GuidanceEngine(CATALOG, GuidanceConfig(conflict_from_thin=False))
+        relaxed.update(frame(0.0, read(EAN_A)))
+        thin_wrong(relaxed)
+        self.assertEqual(relaxed.update(frame(1.0, read(EAN_A))).kind, ActionKind.CONFIRMED)
+
+    def test_reliable_reads_still_conflict_when_thin_ones_are_kept_out(self):
+        engine = GuidanceEngine(CATALOG, GuidanceConfig(conflict_from_thin=False))
+        engine.update(frame(0.0, read(EAN_A)))
+        self.assertEqual(engine.update(frame(0.5, read(EAN_B, x=0.52))).kind, ActionKind.HOLD_STILL)
+
     def test_votes_collected_before_a_conflict_do_not_count_afterwards(self):
         # Långt röstfönster, så att gamla röster annars skulle överleva konflikten.
         engine = GuidanceEngine(CATALOG, GuidanceConfig(confirm_reads=3, confirm_window_s=10.0))

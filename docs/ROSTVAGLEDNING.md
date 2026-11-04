@@ -56,6 +56,7 @@ Takt: minst 1,8 s mellan beskeden, och samma besked upprepas inte oftare än var
 | `conflict_escalate_s` | 5,0 s | Efter så lång konflikt byts "håll stilla" mot "lite närmare" |
 | `deadzone_x` / `deadzone_y` | 0,20 / 0,25 | Hur långt från mitten koden får ligga innan riktning sägs |
 | `min_interval_s` / `repeat_after_s` | 1,8 / 3,0 s | Pratar hellre för lite än för mycket |
+| `conflict_from_thin` | ja | Får en tunn läsning starta en konflikt? Köksprovet 4/11: en tunn felläsning gav "håll stilla" och 4 s extra väntan. Prövas med replay innan det ändras |
 | `no_code_after_s` / `no_code_repeat_s` / `no_code_max` | 8,0 s / 10,0 s / 2 | "Ingen kod": när, hur ofta och hur många gånger per sökning. 0 stänger av. Startvärden, inte prövade |
 
 **Varför just de här reglerna (alla från mätningar):**

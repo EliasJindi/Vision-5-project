@@ -97,6 +97,16 @@ def print_report(report: ReplayReport, records: Sequence[Mapping[str, Any]], con
     print(f"  Sammanfattning: {summary or 'tyst'}")
 
 
+def _parse(raw: str, kind: type) -> object:
+    """Ett värde från kommandoraden. bool('false') är True i Python, så ja/nej tolkas för sig."""
+    if kind is bool:
+        words = {"true": True, "ja": True, "1": True, "false": False, "nej": False, "0": False}
+        if raw.lower() not in words:
+            raise ValueError(raw)
+        return words[raw.lower()]
+    return kind(raw)
+
+
 def build_config(overrides: Sequence[str]) -> GuidanceConfig:
     """Standardvärdena med några ändrade, ur flaggor som 'lost_after_s=8'. SystemExit med förklaring vid fel."""
     defaults = GuidanceConfig()
@@ -107,7 +117,7 @@ def build_config(overrides: Sequence[str]) -> GuidanceConfig:
             valid = ", ".join(f.name for f in dataclasses.fields(GuidanceConfig))
             raise SystemExit(f"❌ --satt {item!r}: använd NAMN=VÄRDE med något av: {valid}")
         try:
-            values[name] = type(getattr(defaults, name))(raw)
+            values[name] = _parse(raw, type(getattr(defaults, name)))
         except ValueError:
             raise SystemExit(f"❌ --satt {item!r}: {raw!r} är inget giltigt värde") from None
     try:
