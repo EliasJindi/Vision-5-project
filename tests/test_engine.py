@@ -38,9 +38,15 @@ class ConfirmationTest(unittest.TestCase):
     def test_product_is_confirmed_again_after_it_has_left_the_view(self):
         self.engine.update(frame(0.0, read()))
         self.engine.update(frame(0.5, read()))
-        self.assertIsNone(self.engine.update(frame(5.0)))           # glömd: >2 s sedan sist
-        self.engine.update(frame(6.0, read()))
-        self.assertEqual(self.engine.update(frame(6.5, read())).kind, ActionKind.CONFIRMED)
+        self.assertIsNone(self.engine.update(frame(6.0)))           # glömd: >5 s sedan sist
+        self.engine.update(frame(7.0, read()))
+        self.assertEqual(self.engine.update(frame(7.5, read())).kind, ActionKind.CONFIRMED)
+
+    def test_product_seen_only_now_and_then_is_not_forgotten_or_reconfirmed(self):
+        self.engine.update(frame(0.0, read()))
+        self.engine.update(frame(0.5, read()))                      # bekräftad
+        for t in (4.0, 8.0, 12.0, 16.0):                            # en läsning var 4:e s, nära gränsen
+            self.assertIsNone(self.engine.update(frame(t, read(thin=True))), t)
 
     def test_unknown_product_is_announced_as_unknown_not_by_name(self):
         self.engine.update(frame(0.0, read(EAN_B)))
@@ -150,6 +156,25 @@ class ConflictTest(unittest.TestCase):
         self.engine.update(frame(8.0, read(EAN_A)))
         self.assertEqual(self.engine.update(frame(8.5, read(EAN_A))).kind, ActionKind.CONFIRMED)
 
+    def alternating(self, engine, start, seconds, step=0.5):
+        """Rätt och fel kod om vartannat från samma ställe, som kaffefiltret 29/10."""
+        actions = []
+        for i in range(int(seconds / step)):
+            ean = EAN_A if i % 2 == 0 else EAN_B
+            actions.append(engine.update(frame(start + i * step, read(ean, x=0.5))))
+        return [a for a in actions if a]
+
+    def test_a_conflict_that_does_not_clear_escalates_from_hold_still_to_closer(self):
+        kinds = [a.kind for a in self.alternating(self.engine, 0.0, 15.0)]
+        first_closer = kinds.index(ActionKind.CLOSER)
+        self.assertEqual(kinds[0], ActionKind.HOLD_STILL)
+        self.assertTrue(all(k is ActionKind.HOLD_STILL for k in kinds[:first_closer]))
+        self.assertTrue(all(k is ActionKind.CLOSER for k in kinds[first_closer:]))   # och tillbaka till håll stilla gör den inte
+
+    def test_a_new_conflict_after_a_quiet_spell_starts_with_hold_still_again(self):
+        self.alternating(self.engine, 0.0, 15.0)
+        self.assertEqual(self.alternating(self.engine, 40.0, 2.0)[0].kind, ActionKind.HOLD_STILL)
+
     def test_codes_in_different_places_are_not_a_conflict(self):
         self.engine.update(frame(0.0, read(EAN_A, x=0.2)))
         self.assertIsNone(self.engine.update(frame(0.5, read(EAN_B, x=0.8))))
@@ -177,7 +202,7 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(GuidanceConfig().confirm_reads, 2)
 
     def test_invalid_values_are_rejected(self):
-        for bad in ({"confirm_reads": 0}, {"confirm_window_s": 0}, {"min_interval_s": -1},
+        for bad in ({"confirm_reads": 0}, {"confirm_window_s": 0}, {"min_interval_s": -1}, {"conflict_escalate_s": 0},
                     {"deadzone_x": 0}, {"deadzone_y": 0.6}, {"conflict_radius": 0}):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
