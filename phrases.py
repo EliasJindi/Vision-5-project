@@ -40,6 +40,7 @@ GUIDANCE_PHRASES = {
     "closer": "Lite närmare.",
     "hold_still": "Håll stilla.",
     "unknown_product": "Okänd vara.",
+    "no_code": "Ingen kod. Vänd varan långsamt.",
 }
 # Riktning. Motorn säger var koden ligger i bilden, konventionen avgör orden:
 #   head: användaren vrider huvudet mot koden.  hand: användaren flyttar varan mot bildens mitt.

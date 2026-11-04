@@ -43,7 +43,8 @@ Motorn får en bildruta i taget och svarar med **högst ett besked**, eller tyst
 | 1 | Två **olika** koder lästes från ungefär samma ställe inom 3 s | **"Håll stilla."** Inget bekräftas under konflikten och 3 s efter. Varar den över 5 s sägs i stället **"Lite närmare."** (närmare tog bort felläsningarna 29/10, och "håll stilla" upprepat i 35 s fastnar användaren i). Är en vara redan bekräftad tiger motorn (en avvikande läsning är då troligen en felläsning) |
 | 2 | Samma vara lästes **säkert** (inte tunn) minst 2 gånger inom 2 s, ingen konflikt | **Varans namn** ("Tomatpure."). Finns den inte i kartan: **"Okänd vara."** Sägs en gång tills varan försvunnit i 2 s |
 | 3 | Koden syns men är osäker (tunn eller ogiltig kontrollsiffra), ingen vara bekräftad | Ligger koden i bildens kant: **riktning** (autofokus följer bildens mitt). Annars **"Lite närmare."** |
-| 4 | Annars (ingen kod, eller en säker läsning som väntar på sin andra) | Tystnad |
+| 4 | **Ingen kod alls** på 8 s | **"Ingen kod. Vänd varan långsamt."** En gång till efter 10 s, sedan tyst tills en kod syns. Inte efter en lyckad läsning (då är sökningen klar). Tystnad hade lämnat användaren utan att veta om systemet söker (Elias, 4/11) |
+| 5 | Annars (en säker läsning som väntar på sin andra) | Tystnad |
 
 Takt: minst 1,8 s mellan beskeden, och samma besked upprepas inte oftare än var 3:e s. Bekräftelsen går före (den är poängen med flödet). Allt ligger i `GuidanceConfig`:
 
@@ -55,6 +56,7 @@ Takt: minst 1,8 s mellan beskeden, och samma besked upprepas inte oftare än var
 | `conflict_escalate_s` | 5,0 s | Efter så lång konflikt byts "håll stilla" mot "lite närmare" |
 | `deadzone_x` / `deadzone_y` | 0,20 / 0,25 | Hur långt från mitten koden får ligga innan riktning sägs |
 | `min_interval_s` / `repeat_after_s` | 1,8 / 3,0 s | Pratar hellre för lite än för mycket |
+| `no_code_after_s` / `no_code_repeat_s` / `no_code_max` | 8,0 s / 10,0 s / 2 | "Ingen kod": när, hur ofta och hur många gånger per sökning. 0 stänger av. Startvärden, inte prövade |
 
 **Varför just de här reglerna (alla från mätningar):**
 - *Tunn = osäker, inte fel.* Nära pixelgränsen är även rätta läsningar 1 px höga (27/10). Därför blir tunn läsning "lite närmare" och inte tystnad.
@@ -93,7 +95,7 @@ Syftet: en separat tjänst (t.ex. i C#) ska kunna bygga applikationslogik ovanp�
 ```
 
 - `read`: loggraden för varje avläsning, oförändrad (fälten står i `HANDOFF.md` avsnitt 3 och i `barcode_scanner.py`). `filter` kan innehålla `tunn` och `orimligt djup`.
-- `guidance`: det Pythons egen motor beslutat. `action` är en av `confirmed`, `unknown_product`, `closer`, `code_left`, `code_right`, `code_above`, `code_below`, `hold_still`. Skickas bara när `--vagledning` är på.
+- `guidance`: det Pythons egen motor beslutat. `action` är en av `confirmed`, `unknown_product`, `closer`, `code_left`, `code_right`, `code_above`, `code_below`, `hold_still`, `no_code`. Skickas bara när `--vagledning` är på.
 - `error`: svar på ett felaktigt kommando.
 
 **In (klient → skanner), bara ett kommando:**
@@ -137,7 +139,7 @@ python3 barcode_scanner.py --diag --4k --facit <EAN> --vagledning tal    # sedan
 - **Inte körd på Pi:n.** Allt är testat med låtsaskamera, äkta streckkoder skapade av zxing-cpp och påhittade loggar. Trösklarna är startvärden från mätningarna och ska justeras mot riktiga körningar.
 - **Konfliktradien (0,10) är ett kvalificerat antagande.** För liten missar konflikter när varan rör sig. För stor kan två grannvaror på en hylla räknas som en konflikt. Ingen mätning av hyllor än: justera efter butiksbesöket och med `replay`.
 - **Ingen pip.** Förslaget nämnde pip plus namn. Namnet räcker som bekräftelse, och en pip kräver ljudstöd i `audio_manager` som inte finns. Kan läggas till senare.
-- **Tystnad när koden inte syns alls.** Rösten kan bara guida när kameran ser kodens position, även som tunn läsning. Är koden helt utanför bild, eller för suddig för att upptäckas, säger den ingenting. Löses senare med fokusområde (B2 i `docs/Vision5_forslag_kodandring_2026-10-20.pdf`) eller en detektor som hittar koden utan att avkoda den.
+- **Rösten kan bara guida mot en kod den ser.** När ingen kod syns säger den bara "Ingen kod. Vänd varan långsamt." (efter 8 s), inte åt vilket håll. Riktning utan läsbar kod kräver fokusområde (B2 i `docs/Vision5_forslag_kodandring_2026-10-20.pdf`) eller en detektor som hittar koden utan att avkoda den. "Ingen kod" kan inte prövas med `replay`, eftersom loggarna bara har bildrutor där en kod lästes.
 - **Mitten av en tunn läsning** är mitten av remsan som avkodades, inte av hela koden. Riktningen kan därför vara något förskjuten.
 - **Ljudkön spelar upp gamla besked** upp till 4 s efter att de köats (nivå 3). Vid långsam syntes kan ett besked komma när läget ändrats. Motorns takt (1,8 s) gör det osannolikt.
 - **Fokuslås (B1) och fokusområde på koden (B2)** i `docs/Vision5_forslag_kodandring_2026-10-20.pdf` är inte byggda. Höjd- och djupfiltren finns i `scan_filters.py`.

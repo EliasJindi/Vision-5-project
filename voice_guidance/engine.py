@@ -13,7 +13,9 @@ Reglerna, i prioritetsordning (se docs/ROSTVAGLEDNING.md):
   2. Bekräfta en vara först när den lästs säkert (inte tunn) flera gånger i rad och ingen konflikt råder.
   3. Annars, om koden syns men inte är säker: säg vart den ska (om den ligger i kanten, eftersom
      autofokus följer bildens mitt) eller "lite närmare".
-  4. Annars tystnad. Motorn pratar hellre för lite än för mycket.
+  4. Syns ingen kod alls på ett tag: "ingen kod, vänd varan långsamt", högst två gånger per sökning.
+     Tystnad hade lämnat användaren utan att veta om systemet söker (Elias, 4/11).
+  5. Annars tystnad. Motorn pratar hellre för lite än för mycket.
 """
 from __future__ import annotations
 
@@ -43,12 +45,18 @@ class GuidanceConfig:
     deadzone_y: float = 0.25
     min_interval_s: float = 1.8      # minst så här lång tid mellan två vägledningar
     repeat_after_s: float = 3.0      # samma vägledning upprepas inte oftare än så här
+    no_code_after_s: float = 8.0     # ingen kod på så här lång tid: "ingen kod, vänd varan" (Elias, 4/11)
+    no_code_repeat_s: float = 10.0   # ...och igen efter så här mycket till
+    no_code_max: int = 2             # högst så många gånger per sökning, sedan tyst tills en kod syns (0 = aldrig)
 
     def __post_init__(self) -> None:
         if self.confirm_reads < 1:
             raise ValueError("confirm_reads måste vara minst 1")
+        if self.no_code_max < 0:
+            raise ValueError("no_code_max får inte vara negativ")
         for name in ("confirm_window_s", "lost_after_s", "conflict_window_s", "conflict_radius",
-                     "conflict_hold_s", "conflict_escalate_s", "min_interval_s", "repeat_after_s"):
+                     "conflict_hold_s", "conflict_escalate_s", "min_interval_s", "repeat_after_s",
+                     "no_code_after_s", "no_code_repeat_s"):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} måste vara större än 0")
         for name in ("deadzone_x", "deadzone_y"):
@@ -71,6 +79,8 @@ class GuidanceEngine:
         self._last_conflict = _NEVER        # senaste gången en konflikt syntes
         self._last_spoken = _NEVER
         self._last_by_kind: Dict[ActionKind, float] = {}
+        self._search_since: Optional[float] = None   # när en kod senast syntes (eller när sökningen började)
+        self._no_code_said = 0                        # hur många gånger "ingen kod" sagts i den här sökningen
 
     @property
     def config(self) -> GuidanceConfig:
@@ -79,6 +89,7 @@ class GuidanceEngine:
     def update(self, obs: FrameObservation) -> Optional[GuidanceAction]:
         t = obs.t
         self._expire(t)
+        self._track_search(obs)
         self._record(obs)
         conflict = self._in_conflict()
         if conflict:
@@ -111,9 +122,18 @@ class GuidanceEngine:
             return (GuidanceAction(ActionKind.CONFIRMED, ean=ean, name=name) if name
                     else GuidanceAction(ActionKind.UNKNOWN_PRODUCT, ean=ean))
 
-        if self._confirmed or not obs.reads or any(r.reliable for r in obs.reads):
-            return None   # redan bekräftad, inget synligt, eller en säker läsning som väntar på sin andra röst
+        if not obs.reads:
+            return self._no_code_prompt(obs.t)
+        if self._confirmed or any(r.reliable for r in obs.reads):
+            return None   # redan bekräftad, eller en säker läsning som väntar på sin andra röst
         return self._aim(obs.reads)
+
+    def _no_code_prompt(self, t: float) -> Optional[GuidanceAction]:
+        """Ingen kod syns. Säg det efter en stund, högst no_code_max gånger per sökning."""
+        if self._no_code_said >= self._cfg.no_code_max:
+            return None
+        due = self._cfg.no_code_after_s + self._no_code_said * self._cfg.no_code_repeat_s
+        return GuidanceAction(ActionKind.NO_CODE) if t - self._search_since >= due else None
 
     def _ready_to_confirm(self) -> Optional[str]:
         ready = [(len(v), v[-1], ean) for ean, v in self._votes.items()
@@ -145,12 +165,22 @@ class GuidanceEngine:
                 return None
         self._last_spoken = t
         self._last_by_kind[action.kind] = t
+        if action.kind is ActionKind.NO_CODE:
+            self._no_code_said += 1
         if action.ean is not None:
             self._confirmed.add(action.ean)
             self._votes.pop(action.ean, None)
+            self._no_code_said = self._cfg.no_code_max   # sökningen lyckades: tjata inte när varan läggs ner
         return action
 
     # ---------- minne ----------
+    def _track_search(self, obs: FrameObservation) -> None:
+        """En ny sökning börjar vid start och när en kod syns som inte redan är bekräftad."""
+        if self._search_since is None or any(r.ean not in self._confirmed for r in obs.reads):
+            self._no_code_said = 0
+        if self._search_since is None or obs.reads:
+            self._search_since = obs.t
+
     def _record(self, obs: FrameObservation) -> None:
         for read in obs.reads:
             if read.ean is None:
