@@ -9,7 +9,7 @@ engine.py - Vad ska användaren få veta just nu?
 
 Reglerna, i prioritetsordning (se docs/ROSTVAGLEDNING.md):
   1. Konflikt: två olika koder från samma ställe inom några sekunder betyder att minst en är fel.
-     Säg "håll stilla" och bekräfta ingenting under en stund.
+     Säg "håll stilla" och bekräfta ingenting under en stund. Varar konflikten länge: "lite närmare".
   2. Bekräfta en vara först när den lästs säkert (inte tunn) flera gånger i rad och ingen konflikt råder.
   3. Annars, om koden syns men inte är säker: säg vart den ska (om den ligger i kanten, eftersom
      autofokus följer bildens mitt) eller "lite närmare".
@@ -34,10 +34,11 @@ class GuidanceConfig:
     """Trösklar. Startvärden, ska finjusteras mot nya körningar och med replay."""
     confirm_reads: int = 2           # säkra läsningar av samma vara som krävs för att säga namnet
     confirm_window_s: float = 2.0    # ...inom så här lång tid
-    lost_after_s: float = 2.0        # varan räknas som borta efter så här lång tid utan läsning
+    lost_after_s: float = 5.0        # varan räknas som borta efter så här lång tid utan läsning
     conflict_window_s: float = 3.0   # två olika koder inom så här lång tid räknas som konflikt...
     conflict_radius: float = 0.10    # ...om de ligger så nära varandra (andel av bildens bredd/höjd)
     conflict_hold_s: float = 3.0     # tyst tid efter en konflikt
+    conflict_escalate_s: float = 5.0   # varar en konflikt så länge byts "håll stilla" mot "lite närmare"
     deadzone_x: float = 0.20         # koden räknas som "i mitten" så länge den ligger inom detta från mitten
     deadzone_y: float = 0.25
     min_interval_s: float = 1.8      # minst så här lång tid mellan två vägledningar
@@ -47,7 +48,7 @@ class GuidanceConfig:
         if self.confirm_reads < 1:
             raise ValueError("confirm_reads måste vara minst 1")
         for name in ("confirm_window_s", "lost_after_s", "conflict_window_s", "conflict_radius",
-                     "conflict_hold_s", "min_interval_s", "repeat_after_s"):
+                     "conflict_hold_s", "conflict_escalate_s", "min_interval_s", "repeat_after_s"):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} måste vara större än 0")
         for name in ("deadzone_x", "deadzone_y"):
@@ -66,6 +67,8 @@ class GuidanceEngine:
         self._last_seen: Dict[str, float] = {}
         self._confirmed: Set[str] = set()                         # redan sagda, tills de försvunnit
         self._conflict_until = _NEVER
+        self._conflict_since = _NEVER       # när den pågående konflikten började
+        self._last_conflict = _NEVER        # senaste gången en konflikt syntes
         self._last_spoken = _NEVER
         self._last_by_kind: Dict[ActionKind, float] = {}
 
@@ -79,15 +82,26 @@ class GuidanceEngine:
         self._record(obs)
         conflict = self._in_conflict()
         if conflict:
-            self._conflict_until = t + self._cfg.conflict_hold_s
-            self._votes.clear()   # röster som samlats under konflikten får inte räknas
+            self._note_conflict(t)
         return self._admit(self._decide(obs, conflict), t)
+
+    def _note_conflict(self, t: float) -> None:
+        if t - self._last_conflict > self._cfg.conflict_hold_s:
+            self._conflict_since = t   # en ny konflikt, inte en fortsättning på den förra
+        self._last_conflict = t
+        self._conflict_until = t + self._cfg.conflict_hold_s
+        self._votes.clear()   # röster som samlats under konflikten får inte räknas
 
     # ---------- beslut ----------
     def _decide(self, obs: FrameObservation, conflict: bool) -> Optional[GuidanceAction]:
         if conflict:
             # Har användaren redan fått varan bekräftad är en ny avvikande läsning troligen en felläsning.
-            return None if self._confirmed else GuidanceAction(ActionKind.HOLD_STILL)
+            if self._confirmed:
+                return None
+            # Går konflikten inte över av att hålla stilla hjälper det att gå närmare (felläsningarna 29/10
+            # försvann när koden blev större), annars sitter användaren fast med "håll stilla".
+            persistent = obs.t - self._conflict_since >= self._cfg.conflict_escalate_s
+            return GuidanceAction(ActionKind.CLOSER if persistent else ActionKind.HOLD_STILL)
         if obs.t < self._conflict_until:
             return None
 

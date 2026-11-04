@@ -40,7 +40,7 @@ Motorn får en bildruta i taget och svarar med **högst ett besked**, eller tyst
 
 | # | Läge | Besked |
 |---|---|---|
-| 1 | Två **olika** koder lästes från ungefär samma ställe inom 3 s | **"Håll stilla."** Inget bekräftas under konflikten och 3 s efter. Är en vara redan bekräftad tiger motorn (en avvikande läsning är då troligen en felläsning) |
+| 1 | Två **olika** koder lästes från ungefär samma ställe inom 3 s | **"Håll stilla."** Inget bekräftas under konflikten och 3 s efter. Varar den över 5 s sägs i stället **"Lite närmare."** (närmare tog bort felläsningarna 29/10, och "håll stilla" upprepat i 35 s fastnar användaren i). Är en vara redan bekräftad tiger motorn (en avvikande läsning är då troligen en felläsning) |
 | 2 | Samma vara lästes **säkert** (inte tunn) minst 2 gånger inom 2 s, ingen konflikt | **Varans namn** ("Tomatpure."). Finns den inte i kartan: **"Okänd vara."** Sägs en gång tills varan försvunnit i 2 s |
 | 3 | Koden syns men är osäker (tunn eller ogiltig kontrollsiffra), ingen vara bekräftad | Ligger koden i bildens kant: **riktning** (autofokus följer bildens mitt). Annars **"Lite närmare."** |
 | 4 | Annars (ingen kod, eller en säker läsning som väntar på sin andra) | Tystnad |
@@ -50,8 +50,9 @@ Takt: minst 1,8 s mellan beskeden, och samma besked upprepas inte oftare än var
 | Värde | Standard | Varför |
 |---|---|---|
 | `confirm_reads` / `confirm_window_s` | 2 / 2,0 s | Röstning. Räcker **inte** ensamt mot systematiska felkoder (se konfliktregeln) |
-| `lost_after_s` | 2,0 s | Efter så lång tid utan läsning räknas varan som borta |
+| `lost_after_s` | 5,0 s | Efter så lång tid utan läsning räknas varan som borta. Nära pixelgränsen kommer läsningar glest, och med 2 s började rösten guida om en vara som redan sagts |
 | `conflict_window_s` / `conflict_radius` / `conflict_hold_s` | 3,0 s / 0,10 / 3,0 s | **Gissat, ska finjusteras.** Se nedan |
+| `conflict_escalate_s` | 5,0 s | Efter så lång konflikt byts "håll stilla" mot "lite närmare" |
 | `deadzone_x` / `deadzone_y` | 0,20 / 0,25 | Hur långt från mitten koden får ligga innan riktning sägs |
 | `min_interval_s` / `repeat_after_s` | 1,8 / 3,0 s | Pratar hellre för lite än för mycket |
 
@@ -122,6 +123,8 @@ python3 -m unittest discover -s tests -t .
 # Vad hade vägledningen sagt under gamla körningar? Visar framför allt om den hade sagt FEL vara:
 python3 -m voice_guidance.replay logs/scan_*.jsonl --karta kartor/produkter.geojson
 # (avslutar med felkod 1 om någon bekräftelse hade varit fel)
+# Prova andra trösklar utan att ändra koden:
+python3 -m voice_guidance.replay logs/scan_*.jsonl --karta kartor/produkter.geojson --satt lost_after_s=8 --satt min_interval_s=2.5
 
 # På Pi:n, i den här ordningen:
 python3 tts_engine.py --prewarm                                   # utan kameran igång

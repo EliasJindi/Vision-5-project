@@ -10,10 +10,12 @@ replay.py - Vad hade röstvägledningen sagt under de här körningarna?
 
     python3 -m voice_guidance.replay logs/scan_20261029_*.jsonl
     python3 -m voice_guidance.replay logs/scan_*.jsonl --karta kartor/produkter.geojson --sikte hand
+    python3 -m voice_guidance.replay logs/scan_20261029_*.jsonl --satt lost_after_s=8 --satt min_interval_s=2.5
 """
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import glob
 from collections import Counter
 from dataclasses import dataclass, field
@@ -23,7 +25,7 @@ from analyze_scans import read_log
 from phrases import guidance_text
 
 from .catalog import DictProductCatalog, EmptyProductCatalog, ProductCatalog
-from .engine import GuidanceEngine
+from .engine import GuidanceConfig, GuidanceEngine
 from .model import ActionKind, AimConvention, CodeRead, FrameObservation, GuidanceAction
 
 _CONFIRMATIONS = (ActionKind.CONFIRMED, ActionKind.UNKNOWN_PRODUCT)
@@ -95,13 +97,37 @@ def print_report(report: ReplayReport, records: Sequence[Mapping[str, Any]], con
     print(f"  Sammanfattning: {summary or 'tyst'}")
 
 
+def build_config(overrides: Sequence[str]) -> GuidanceConfig:
+    """Standardvärdena med några ändrade, ur flaggor som 'lost_after_s=8'. SystemExit med förklaring vid fel."""
+    defaults = GuidanceConfig()
+    values = {}
+    for item in overrides:
+        name, separator, raw = item.partition("=")
+        if not separator or not hasattr(defaults, name):
+            valid = ", ".join(f.name for f in dataclasses.fields(GuidanceConfig))
+            raise SystemExit(f"❌ --satt {item!r}: använd NAMN=VÄRDE med något av: {valid}")
+        try:
+            values[name] = type(getattr(defaults, name))(raw)
+        except ValueError:
+            raise SystemExit(f"❌ --satt {item!r}: {raw!r} är inget giltigt värde") from None
+    try:
+        return dataclasses.replace(defaults, **values)
+    except ValueError as e:
+        raise SystemExit(f"❌ --satt: {e}") from None
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Spela upp röstvägledningen mot gamla skannerloggar")
     ap.add_argument("loggar", nargs="+", help="logs/scan_*.jsonl")
     ap.add_argument("--karta", help="produktkartan (geojson), för varunamn. Utan den blir allt 'okänd vara'")
     ap.add_argument("--sikte", choices=("huvud", "hand"), default="huvud")
+    ap.add_argument("--satt", action="append", default=[], metavar="NAMN=VÄRDE",
+                    help="ändra en tröskel för den här uppspelningen, t.ex. --satt lost_after_s=8 (kan upprepas)")
     args = ap.parse_args(argv)
 
+    config = build_config(args.satt)
+    if args.satt:
+        print("Ändrade trösklar: " + ", ".join(args.satt))
     catalog: ProductCatalog = DictProductCatalog.from_geojson(args.karta) if args.karta else EmptyProductCatalog()
     convention = AimConvention.HEAD if args.sikte == "huvud" else AimConvention.HAND
     paths = sorted({p for pattern in args.loggar for p in (glob.glob(pattern) or [pattern])})
@@ -111,7 +137,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         records = read_log(path)
         if not records:
             continue
-        report = replay(records, GuidanceEngine(catalog), path.split("/")[-1])
+        report = replay(records, GuidanceEngine(catalog, config), path.split("/")[-1])
         print_report(report, records, convention)
         totals["loggar"] += 1
         totals["bekräftelser"] += len(report.confirmations)

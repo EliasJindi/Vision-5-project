@@ -5,8 +5,8 @@ import os
 import tempfile
 import unittest
 
-from voice_guidance import ActionKind, DictProductCatalog, GuidanceEngine
-from voice_guidance.replay import frames_from_records, main, replay
+from voice_guidance import ActionKind, DictProductCatalog, GuidanceConfig, GuidanceEngine
+from voice_guidance.replay import build_config, frames_from_records, main, replay
 
 from tests.helpers import EAN_A, EAN_B, THIN_CORNERS, record
 
@@ -52,6 +52,35 @@ class ReplayTest(unittest.TestCase):
         report = replay(records, GuidanceEngine(CATALOG))
         self.assertEqual(report.frames, 3)
         self.assertEqual(len(report.confirmations), 1)
+
+
+class BuildConfigTest(unittest.TestCase):
+    def test_overrides_replace_only_the_named_values(self):
+        config = build_config(["lost_after_s=8", "confirm_reads=3"])
+        self.assertEqual((config.lost_after_s, config.confirm_reads), (8.0, 3))
+        self.assertEqual(config.min_interval_s, GuidanceConfig().min_interval_s)
+
+    def test_no_overrides_gives_the_defaults(self):
+        self.assertEqual(build_config([]), GuidanceConfig())
+
+    def test_unknown_names_bad_values_and_invalid_configs_are_explained(self):
+        for bad in ("nonsense=1", "lost_after_s", "lost_after_s=abc", "confirm_reads=0", "confirm_reads=2.5"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(SystemExit) as caught:
+                    build_config([bad])
+                self.assertIn("--satt", str(caught.exception))
+
+    def test_the_command_line_applies_overrides(self):
+        records = [record(1.0, facit=EAN_A, filter=[]), record(1.5, facit=EAN_A, filter=[])]
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "scan_test.jsonl")
+            with open(path, "w", encoding="utf-8") as f:
+                f.writelines(json.dumps(rec) + "\n" for rec in records)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                main([path, "--satt", "confirm_reads=3"])
+        self.assertIn("Ändrade trösklar: confirm_reads=3", out.getvalue())
+        self.assertIn("0 bekräftelser", out.getvalue())   # tre röster krävs, bara två finns
 
 
 class CommandLineTest(unittest.TestCase):
