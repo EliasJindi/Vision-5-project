@@ -45,7 +45,7 @@ class GuidanceSession:
         if action is not None:
             text = self._voice.announce(action)
             self._link.publish({"type": "guidance", "t": round(t, 3), "action": action.kind.value,
-                                "ean": action.ean, "name": action.name, "text": text})
+                                "ean": action.ean, "name": action.name, "details": list(action.details), "text": text})
         return action
 
     def close(self) -> None:
@@ -71,11 +71,12 @@ def create_session(products: Mapping[str, Any], mode: GuidanceMode = GuidanceMod
     link_port=None stänger länken. Med länk men utan vägledning läser skannern ändå upp
     say-kommandon, så att ett externt program kan styra rösten.
     """
+    catalog = DictProductCatalog(products)
     speaker: Optional[Speaker] = None
     if mode is GuidanceMode.TEXT:
         speaker = ConsoleSpeaker()
     elif mode is GuidanceMode.VOICE or link_port is not None:
-        speaker = _voice_speaker()
+        speaker = _voice_speaker(catalog.announcements())
 
     link: EventPublisher = NullPublisher()
     if link_port is not None:
@@ -87,12 +88,12 @@ def create_session(products: Mapping[str, Any], mode: GuidanceMode = GuidanceMod
 
     if mode is GuidanceMode.OFF:
         return GuidanceSession(None, None, link)
-    return GuidanceSession(GuidanceEngine(DictProductCatalog(products)), GuidanceVoice(speaker, convention), link)
+    return GuidanceSession(GuidanceEngine(catalog), GuidanceVoice(speaker, convention), link)
 
 
-def _voice_speaker() -> Speaker:
+def _voice_speaker(phrases: Sequence[str] = ()) -> Speaker:
     try:
-        return AudioManagerSpeaker()
+        return AudioManagerSpeaker(phrases=phrases)
     except Exception as e:   # t.ex. Piper eller pw-play saknas: säg det högt i stället för att tiga
         print(f"⚠️  [Vägledning] ljudsystemet kunde inte startas ({e!r}). Skriver ut i stället.")
         return ConsoleSpeaker()

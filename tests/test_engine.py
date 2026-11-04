@@ -118,7 +118,7 @@ class PacingTest(unittest.TestCase):
     def test_same_guidance_is_not_repeated_too_often(self):
         self.assertEqual(self.thin(0.0).kind, ActionKind.CLOSER)
         self.assertIsNone(self.thin(1.0))
-        self.assertIsNone(self.thin(2.0))     # över min_interval men under repeat_after (3 s)
+        self.assertEqual(self.thin(2.0).kind, ActionKind.CODE_SEEN)   # under repeat_after (3 s): pip i stället
         self.assertEqual(self.thin(3.1).kind, ActionKind.CLOSER)
 
     def test_two_different_messages_are_kept_apart(self):
@@ -131,6 +131,53 @@ class PacingTest(unittest.TestCase):
         engine.update(frame(0.0, read(thin=True)))                             # CLOSER
         engine.update(frame(0.2, read()))
         self.assertEqual(engine.update(frame(0.4, read())).kind, ActionKind.CONFIRMED)
+
+
+class CueTest(unittest.TestCase):
+    """Pip när en osäker kod syns men talet hålls tillbaka, så att användaren vet att den syns."""
+
+    def run_thin(self, engine, times, **kw):
+        return [(t, a.kind) for t in times for a in [engine.update(frame(t, read(thin=True, **kw)))] if a]
+
+    def test_pips_fill_the_gaps_between_spoken_guidance(self):
+        got = self.run_thin(GuidanceEngine(EmptyProductCatalog()), [i * 0.3 for i in range(14)])
+        self.assertEqual(got[0], (0.0, ActionKind.CLOSER))
+        cues = [t for t, k in got if k is ActionKind.CODE_SEEN]
+        self.assertTrue(cues, got)
+        self.assertGreaterEqual(min(cues), 1.2)                                   # inte mitt i frasen
+        self.assertTrue(all(b - a >= 1.0 - 1e-9 for a, b in zip(cues, cues[1:])), cues)   # högst ett per sekund
+        self.assertIn(ActionKind.CLOSER, [k for t, k in got if t >= 3.0])          # pipet sköt inte upp talet
+
+    def test_no_pip_when_nothing_is_seen_or_the_product_is_confirmed(self):
+        engine = GuidanceEngine(CATALOG)
+        engine.update(frame(0.0, read()))
+        engine.update(frame(0.5, read()))                                          # bekräftad
+        for t in (2.0, 3.0, 4.0):
+            self.assertIsNone(engine.update(frame(t, read(thin=True))), t)
+        self.assertNotIn(ActionKind.CODE_SEEN, kinds(GuidanceEngine(CATALOG).update(frame(t)) for t in (1, 2, 3)))
+
+    def test_no_pip_during_a_conflict(self):
+        engine = GuidanceEngine(CATALOG)
+        engine.update(frame(0.0, read(EAN_A)))
+        engine.update(frame(0.5, read(EAN_B, x=0.52)))                            # håll stilla
+        later = [engine.update(frame(t, read(EAN_A, thin=True))) for t in (2.0, 2.5, 3.0)]
+        self.assertNotIn(ActionKind.CODE_SEEN, kinds(later))
+
+    def test_cue_interval_zero_turns_the_pip_off(self):
+        got = self.run_thin(GuidanceEngine(EmptyProductCatalog(), GuidanceConfig(cue_interval_s=0)),
+                            [i * 0.3 for i in range(14)])
+        self.assertNotIn(ActionKind.CODE_SEEN, [k for _, k in got])
+
+
+class DetailsTest(unittest.TestCase):
+    def test_confirmation_carries_the_details_from_the_catalog(self):
+        engine = GuidanceEngine(DictProductCatalog({EAN_A: [{"namn": "Tomatpure", "info": ["140 gram"]}]}))
+        engine.update(frame(0.0, read()))
+        self.assertEqual(engine.update(frame(0.5, read())).details, ("140 gram",))
+
+    def test_details_only_belong_to_a_confirmation(self):
+        with self.assertRaises(ValueError):
+            GuidanceAction(ActionKind.CLOSER, details=("140 gram",))
 
 
 class ConflictTest(unittest.TestCase):
@@ -259,7 +306,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_invalid_values_are_rejected(self):
         for bad in ({"confirm_reads": 0}, {"confirm_window_s": 0}, {"min_interval_s": -1}, {"conflict_escalate_s": 0},
-                    {"no_code_after_s": 0}, {"no_code_repeat_s": -1}, {"no_code_max": -1},
+                    {"no_code_after_s": 0}, {"no_code_repeat_s": -1}, {"no_code_max": -1}, {"cue_interval_s": -1}, {"cue_quiet_s": -0.1},
                     {"deadzone_x": 0}, {"deadzone_y": 0.6}, {"conflict_radius": 0}):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):

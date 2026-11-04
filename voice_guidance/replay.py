@@ -88,11 +88,12 @@ def replay(records: Sequence[Mapping[str, Any]], engine: GuidanceEngine, name: s
 
 def print_report(report: ReplayReport, records: Sequence[Mapping[str, Any]], convention: AimConvention) -> None:
     start = float(records[0]["t"]) if records else 0.0
-    print(f"\n== {report.name}: {report.frames} bildrutor med läsning, {len(report.events)} besked")
-    for e in report.events:
+    spoken = [e for e in report.events if e.action.kind is not ActionKind.CODE_SEEN]   # pip bara i summan
+    print(f"\n== {report.name}: {report.frames} bildrutor med läsning, {len(spoken)} besked")
+    for e in spoken:
         mark = {True: " ✅", False: " ❌ FEL VARA"}.get(e.correct, "")
-        print(f"  +{e.t - start:6.1f} s  {guidance_text(e.action.kind.value, convention.value, e.action.name):28s}"
-              f" ({e.action.kind.value}){mark}")
+        text = guidance_text(e.action.kind.value, convention.value, e.action.name, e.action.details)
+        print(f"  +{e.t - start:6.1f} s  {text:28s} ({e.action.kind.value}){mark}")
     summary = ", ".join(f"{k.value} {report.count(k)}" for k in ActionKind if report.count(k))
     print(f"  Sammanfattning: {summary or 'tyst'}")
 

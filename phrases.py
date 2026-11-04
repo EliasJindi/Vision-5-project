@@ -52,12 +52,17 @@ AIM_PHRASES = {
 }
 
 
-def guidance_text(kind, convention="head", name=None):
-    """Frasen för ett vägledningsbesked. 'confirmed' kräver ett varunamn."""
+def _sentence(text):
+    text = text.strip()
+    return f"{text[:1].upper()}{text[1:]}" + ("" if text[-1:] in ".!?" else ".")
+
+
+def guidance_text(kind, convention="head", name=None, details=()):
+    """Frasen för ett vägledningsbesked. 'confirmed' kräver ett varunamn, details läses efter namnet."""
     if kind == "confirmed":
         if not name:
             raise ValueError("'confirmed' kräver ett varunamn")
-        return f"{name[:1].upper()}{name[1:]}."
+        return " ".join(_sentence(part) for part in (name, *details))
     if kind in GUIDANCE_PHRASES:
         return GUIDANCE_PHRASES[kind]
     try:

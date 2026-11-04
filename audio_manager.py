@@ -9,6 +9,8 @@
 #   Piper per meddelande. TTL kollas igen efter syntesen. Ett väntande akutlarm går före.
 # - prewarm(): laddar bara röstmodellen vid start (cachen görs med tts_engine.py --prewarm).
 # - Telemetri: nya händelser audio_start (när ljudet faktiskt börjar) och speak_error.
+# 2026-11-04: speak(wav=..., ttl=...) spelar en färdig ljudfil (röstvägledningens pip) med egen
+#   bäst-före. Utan de argumenten är allt som förut.
 # =============================================================================
 import queue
 import threading
@@ -64,7 +66,8 @@ class AudioManager:
                 print("    Generera alla i förväg, UTAN kameran igång: python3 tts_engine.py --prewarm")
         threading.Thread(target=run, daemon=True).start()
 
-    def speak(self, text: str, priority: int = 3, msg_id=None, t_detect=None, key=None):
+    def speak(self, text: str, priority: int = 3, msg_id=None, t_detect=None, key=None, wav=None, ttl=None):
+        """wav: spela den här filen i stället för att syntetisera text. ttl: egen bäst-före i sekunder."""
         if msg_id is None:
             msg_id = telemetry.new_id()
         if t_detect is None:
@@ -93,7 +96,7 @@ class AudioManager:
         # Döda processerna UTANFÖR låset så att kameraloopen aldrig väntar på dem
         self._kill(procs_to_stop)
 
-        self.queue.put((priority, seq, msg_id, t_detect, text, key))
+        self.queue.put((priority, seq, msg_id, t_detect, text, key, wav, ttl))
 
     def _detach_current(self, reason):
         """Måste anropas med self.lock. Returnerar processerna som ska dödas."""
@@ -127,10 +130,10 @@ class AudioManager:
             procs = self._detach_current("manual")
         self._kill(procs)
 
-    def _is_stale(self, priority, seq, key, t_detect, msg_id, text):
+    def _is_stale(self, priority, seq, key, t_detect, msg_id, text, ttl=None):
         """Kollas både innan och efter syntesen: under syntesen kan läget ha ändrats."""
         age = time.time() - t_detect
-        if age > TTL_PER_PRIORITY.get(priority, 4.0):
+        if age > (ttl if ttl is not None else TTL_PER_PRIORITY.get(priority, 4.0)):
             print(f"[{time.strftime('%H:%M:%S')}] ⏳ [AudioQueue] Klipper inaktuellt ljud ({age:.1f}s gammalt): '{text}'")
             telemetry.log("speak_dropped", id=msg_id, reason="ttl", age=age)
             return True
@@ -148,9 +151,9 @@ class AudioManager:
         while True:
             try:
                 item = self.queue.get()
-                priority, seq, msg_id, t_detect, text, key = item
+                priority, seq, msg_id, t_detect, text, key, given_wav, ttl = item
 
-                if self._is_stale(priority, seq, key, t_detect, msg_id, text):
+                if self._is_stale(priority, seq, key, t_detect, msg_id, text, ttl):
                     self.queue.task_done()
                     continue
 
@@ -160,7 +163,10 @@ class AudioManager:
                 # 1. Hämta ljudfil: från cachen (direkt) eller via Piper som redan är igång
                 cacheable = priority != 2  # Nivå 2 = Gemini-svar, unika varje gång
                 t_synth = time.time()
-                wav, cache_hit, temporary = self.tts.get_wav(text, cacheable=cacheable)
+                if given_wav is not None:
+                    wav, cache_hit, temporary = given_wav, True, False
+                else:
+                    wav, cache_hit, temporary = self.tts.get_wav(text, cacheable=cacheable)
                 if wav is None:
                     print(f"❌ [AudioQueue] Talsyntesen misslyckades: '{text}'")
                     telemetry.log("speak_error", id=msg_id, error="tts_failed")
@@ -168,7 +174,7 @@ class AudioManager:
                     continue
 
                 # 2. Har något blivit viktigare/inaktuellt medan vi syntetiserade?
-                if self._is_stale(priority, seq, key, t_detect, msg_id, text):
+                if self._is_stale(priority, seq, key, t_detect, msg_id, text, ttl):
                     self._cleanup(wav, temporary)
                     self.queue.task_done()
                     continue

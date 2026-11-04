@@ -3,6 +3,7 @@
 # PIPER_CPUS begränsar Piper till 2 kärnor (Pi:n dog av strömbrist med alla 4).
 # Kör "python3 tts_engine.py --prewarm" för att generera akutfraserna i förväg.
 # 2026-11-03: --prewarm genererar även de fasta fraserna för röstvägledningen (phrases.guidance_phrases).
+# 2026-11-04: --prewarm genererar även varunamnen ur kartan (med info), så att bekräftelsen inte dröjer.
 # =========================================================================
 """
 tts_engine.py - Piper som körs hela tiden + cache av färdiga ljudfiler.
@@ -195,8 +196,17 @@ if __name__ == "__main__":
         print("Användning: python3 tts_engine.py --prewarm   (kör UTAN att detect_spatial.py eller barcode_scanner.py är igång)")
         sys.exit(0)
 
+    PRODUCT_MAP = "kartor/produkter.geojson"
+    products = []
+    if os.path.exists(PRODUCT_MAP):
+        from voice_guidance.catalog import DictProductCatalog
+        try:
+            products = DictProductCatalog.from_geojson(PRODUCT_MAP).announcements()
+        except ValueError as e:   # t.ex. för lång info: säg det nu, inte först i butiken
+            sys.exit(f"❌ {PRODUCT_MAP}: {e}")
+        print(f"Varor ur {PRODUCT_MAP}: {len(products)} bekräftelser.")
     engine = TTSEngine()
-    phrases = sorted(set(common_phrases()) | set(guidance_phrases()))   # akutfraser + röstvägledning
+    phrases = sorted(set(common_phrases()) | set(guidance_phrases()) | set(products))   # akut + vägledning + varor
     todo = engine.missing(phrases)
     print(f"{len(phrases) - len(todo)} av {len(phrases)} fraser finns redan. Genererar {len(todo)}...")
     t0 = time.time()

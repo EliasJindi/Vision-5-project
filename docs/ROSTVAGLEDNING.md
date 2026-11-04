@@ -41,10 +41,12 @@ Motorn får en bildruta i taget och svarar med **högst ett besked**, eller tyst
 | # | Läge | Besked |
 |---|---|---|
 | 1 | Två **olika** koder lästes från ungefär samma ställe inom 3 s | **"Håll stilla."** Inget bekräftas under konflikten och 3 s efter. Varar den över 5 s sägs i stället **"Lite närmare."** (närmare tog bort felläsningarna 29/10, och "håll stilla" upprepat i 35 s fastnar användaren i). Är en vara redan bekräftad tiger motorn (en avvikande läsning är då troligen en felläsning) |
-| 2 | Samma vara lästes **säkert** (inte tunn) minst 2 gånger inom 2 s, ingen konflikt | **Varans namn** ("Tomatpure."). Finns den inte i kartan: **"Okänd vara."** Sägs en gång tills varan försvunnit i 2 s |
+| 2 | Samma vara lästes **säkert** (inte tunn) minst 2 gånger inom 2 s, ingen konflikt | **Varans namn** ("Tomatpure."), följt av kartans `info` om den finns ("Tomatpure. 140 gram. Hylla 3."). Finns varan inte i kartan: **"Okänd vara."** Sägs en gång tills varan varit borta i 5 s |
 | 3 | Koden syns men är osäker (tunn eller ogiltig kontrollsiffra), ingen vara bekräftad | Ligger koden i bildens kant: **riktning** (autofokus följer bildens mitt). Annars **"Lite närmare."** |
 | 4 | **Ingen kod alls** på 8 s | **"Ingen kod. Vänd varan långsamt."** En gång till efter 10 s, sedan tyst tills en kod syns. Inte efter en lyckad läsning (då är sökningen klar). Tystnad hade lämnat användaren utan att veta om systemet söker (Elias, 4/11) |
 | 5 | Annars (en säker läsning som väntar på sin andra) | Tystnad |
+
+**Pip** (4/11): när regel 3 vill säga något men takten håller tillbaka talet hörs i stället ett kort pip (70 ms), högst ett per sekund och inte närmare än 1,2 s efter tal. Användaren hör då att en kod syns och kan sluta vrida, utan att rösten pratar hela tiden. Pipet skjuter inte upp nästa vägledning. Inget pip under en konflikt, när varan redan är bekräftad, eller när ingen kod syns. Ett pip som fått vänta mer än 0,6 s i ljudkön (t.ex. bakom ett akutlarm) slängs, eftersom det då inte längre stämmer med bilden.
 
 Takt: minst 1,8 s mellan beskeden, och samma besked upprepas inte oftare än var 3:e s. Bekräftelsen går före (den är poängen med flödet). Allt ligger i `GuidanceConfig`:
 
@@ -57,6 +59,7 @@ Takt: minst 1,8 s mellan beskeden, och samma besked upprepas inte oftare än var
 | `deadzone_x` / `deadzone_y` | 0,20 / 0,25 | Hur långt från mitten koden får ligga innan riktning sägs |
 | `min_interval_s` / `repeat_after_s` | 1,8 / 3,0 s | Pratar hellre för lite än för mycket |
 | `conflict_from_thin` | ja | Får en tunn läsning starta en konflikt? Köksprovet 4/11: en tunn felläsning gav "håll stilla" och 4 s extra väntan. Prövas med replay innan det ändras |
+| `cue_interval_s` / `cue_quiet_s` | 1,0 s / 1,2 s | Pip: högst så här ofta, och inte så här snart efter tal. `cue_interval_s=0` stänger av pipet. Startvärden, inte prövade |
 | `no_code_after_s` / `no_code_repeat_s` / `no_code_max` | 8,0 s / 10,0 s / 2 | "Ingen kod": när, hur ofta och hur många gånger per sökning. 0 stänger av. Startvärden, inte prövade |
 
 **Varför just de här reglerna (alla från mätningar):**
@@ -78,7 +81,9 @@ Alla fraser ligger i `phrases.py` (`GUIDANCE_PHRASES`, `AIM_PHRASES`). Motorn s�
 
 **Öppen fråga till Elias:** vilken konvention ska gälla? Kameran sitter på huvudet, så `huvud` är standard. Välj **en** och håll fast vid den.
 
-Fasta fraser genereras i förväg med `python3 tts_engine.py --prewarm` (utan att kameran är igång: Pi:n har dött av strömbrist när båda körts samtidigt). Varunamn genereras första gången de sägs (~0,5 s) och cachas sedan.
+Fasta fraser **och varunamnen i kartan** (med `info`) genereras i förväg med `python3 tts_engine.py --prewarm` (utan att kameran är igång: Pi:n har dött av strömbrist när båda körts samtidigt). Kör den igen när kartan ändras. Annars genereras ett nytt namn första gången det sägs (~0,5 s). Vid start skriver skannern hur många fraser som finns i cachen.
+
+**Mer om varan:** fältet `info` i `kartor/produkter.geojson` är valfritt, text eller lista med högst 2 delar på högst 40 tecken, till exempel `"info": ["140 gram", "hylla 3"]`. Varje ord kostar tid innan användaren kan gå vidare, så bara det viktigaste ska vara med. För lång info stoppar starten med en förklaring i stället för att läsas upp.
 
 ## Länken till andra program
 
@@ -96,7 +101,7 @@ Syftet: en separat tjänst (t.ex. i C#) ska kunna bygga applikationslogik ovanp�
 ```
 
 - `read`: loggraden för varje avläsning, oförändrad (fälten står i `HANDOFF.md` avsnitt 3 och i `barcode_scanner.py`). `filter` kan innehålla `tunn` och `orimligt djup`.
-- `guidance`: det Pythons egen motor beslutat. `action` är en av `confirmed`, `unknown_product`, `closer`, `code_left`, `code_right`, `code_above`, `code_below`, `hold_still`, `no_code`. Skickas bara när `--vagledning` är på.
+- `guidance`: det Pythons egen motor beslutat. `action` är en av `confirmed`, `unknown_product`, `closer`, `code_left`, `code_right`, `code_above`, `code_below`, `hold_still`, `no_code`, `code_seen` (pipet, `text` är "♪"). Vid `confirmed` finns även `details`. Skickas bara när `--vagledning` är på.
 - `error`: svar på ett felaktigt kommando.
 
 **In (klient → skanner), bara ett kommando:**
