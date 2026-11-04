@@ -28,7 +28,7 @@ class GuidanceSessionTest(unittest.TestCase):
         self.assertEqual(speaker.texts, ["Tomatpure."])
         guidance = link.of_type("guidance")
         self.assertEqual(guidance, [{"type": "guidance", "t": 1.5, "action": "confirmed", "ean": EAN_A,
-                                     "name": "Tomatpure", "text": "Tomatpure."}])
+                                     "name": "Tomatpure", "details": [], "text": "Tomatpure."}])
 
     def test_every_record_is_published_as_a_read_event(self):
         session, link, _ = build()

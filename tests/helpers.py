@@ -44,6 +44,9 @@ class FakeSpeaker:
     def say(self, text: str, key: Optional[str] = None) -> None:
         self.said.append((text, key))
 
+    def cue(self) -> None:
+        self.said.append(("♪", "cue"))
+
     @property
     def texts(self) -> List[str]:
         return [text for text, _ in self.said]

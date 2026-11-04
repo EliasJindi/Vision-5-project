@@ -16,6 +16,10 @@ Reglerna, i prioritetsordning (se docs/ROSTVAGLEDNING.md):
   4. Syns ingen kod alls på ett tag: "ingen kod, vänd varan långsamt", högst två gånger per sökning.
      Tystnad hade lämnat användaren utan att veta om systemet söker (Elias, 4/11).
   5. Annars tystnad. Motorn pratar hellre för lite än för mycket.
+
+Pip: när regel 3 hade velat säga något men takten håller tillbaka talet hörs ett kort pip i stället
+(högst ett per sekund). Användaren vet då att en kod syns och kan sluta vrida, utan att rösten pratar
+oavbrutet. Inget pip under konflikt eller när varan redan är bekräftad.
 """
 from __future__ import annotations
 
@@ -29,6 +33,8 @@ from .model import (ActionKind, CodeRead, FrameObservation, GuidanceAction, Poin
 
 _NEVER = float("-inf")
 _CONFIRMATIONS = (ActionKind.CONFIRMED, ActionKind.UNKNOWN_PRODUCT)
+_AIMS = (ActionKind.CLOSER, ActionKind.CODE_LEFT, ActionKind.CODE_RIGHT, ActionKind.CODE_ABOVE,
+         ActionKind.CODE_BELOW)
 
 
 @dataclass(frozen=True)
@@ -49,12 +55,16 @@ class GuidanceConfig:
     no_code_after_s: float = 8.0     # ingen kod på så här lång tid: "ingen kod, vänd varan" (Elias, 4/11)
     no_code_repeat_s: float = 10.0   # ...och igen efter så här mycket till
     no_code_max: int = 2             # högst så många gånger per sökning, sedan tyst tills en kod syns (0 = aldrig)
+    cue_interval_s: float = 1.0      # pip när en osäker kod syns men talet hålls tillbaka, högst så här ofta (0 = av)
+    cue_quiet_s: float = 1.2         # inget pip så här snart efter tal, så att pipet inte hamnar mitt i en fras
 
     def __post_init__(self) -> None:
         if self.confirm_reads < 1:
             raise ValueError("confirm_reads måste vara minst 1")
         if self.no_code_max < 0:
             raise ValueError("no_code_max får inte vara negativ")
+        if self.cue_interval_s < 0 or self.cue_quiet_s < 0:
+            raise ValueError("cue_interval_s och cue_quiet_s får inte vara negativa")
         for name in ("confirm_window_s", "lost_after_s", "conflict_window_s", "conflict_radius",
                      "conflict_hold_s", "conflict_escalate_s", "min_interval_s", "repeat_after_s",
                      "no_code_after_s", "no_code_repeat_s"):
@@ -82,6 +92,7 @@ class GuidanceEngine:
         self._last_by_kind: Dict[ActionKind, float] = {}
         self._search_since: Optional[float] = None   # när en kod senast syntes (eller när sökningen började)
         self._no_code_said = 0                        # hur många gånger "ingen kod" sagts i den här sökningen
+        self._last_cue = _NEVER
 
     @property
     def config(self) -> GuidanceConfig:
@@ -95,7 +106,19 @@ class GuidanceEngine:
         conflict = self._in_conflict()
         if conflict:
             self._note_conflict(t)
-        return self._admit(self._decide(obs, conflict), t)
+        decided = self._decide(obs, conflict)
+        action = self._admit(decided, t)
+        if action is None and decided is not None and decided.kind in _AIMS and not conflict:
+            action = self._cue(t)   # talet hölls tillbaka av takten: pipa i stället
+        return action
+
+    def _cue(self, t: float) -> Optional[GuidanceAction]:
+        """Ett pip räknas inte som tal: det skjuter inte upp nästa vägledning."""
+        cfg = self._cfg
+        if cfg.cue_interval_s == 0 or t - self._last_spoken < cfg.cue_quiet_s or t - self._last_cue < cfg.cue_interval_s:
+            return None
+        self._last_cue = t
+        return GuidanceAction(ActionKind.CODE_SEEN)
 
     def _note_conflict(self, t: float) -> None:
         if t - self._last_conflict > self._cfg.conflict_hold_s:
@@ -120,8 +143,8 @@ class GuidanceEngine:
         ean = self._ready_to_confirm()
         if ean is not None:
             name = self._catalog.name_of(ean)
-            return (GuidanceAction(ActionKind.CONFIRMED, ean=ean, name=name) if name
-                    else GuidanceAction(ActionKind.UNKNOWN_PRODUCT, ean=ean))
+            return (GuidanceAction(ActionKind.CONFIRMED, ean=ean, name=name, details=self._catalog.details_of(ean))
+                    if name else GuidanceAction(ActionKind.UNKNOWN_PRODUCT, ean=ean))
 
         if not obs.reads:
             return self._no_code_prompt(obs.t)

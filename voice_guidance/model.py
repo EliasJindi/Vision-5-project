@@ -32,6 +32,7 @@ class ActionKind(Enum):
     CODE_BELOW = "code_below"
     HOLD_STILL = "hold_still"              # två olika koder från samma ställe: osäkert
     NO_CODE = "no_code"                    # ingen kod har synts på ett tag: koden sitter troligen på en annan sida
+    CODE_SEEN = "code_seen"                # ett kort pip, inget tal: en kod syns men är inte läsbar än
 
 
 class AimConvention(Enum):
@@ -97,12 +98,15 @@ class GuidanceAction:
     kind: ActionKind
     ean: Optional[str] = None
     name: Optional[str] = None
+    details: Tuple[str, ...] = ()   # mer om varan ur kartan, t.ex. ("140 gram", "hylla 3"). Bara vid CONFIRMED
 
     def __post_init__(self) -> None:
         if self.kind in (ActionKind.CONFIRMED, ActionKind.UNKNOWN_PRODUCT) and not self.ean:
             raise ValueError(f"{self.kind.name} kräver en EAN")
         if self.kind is ActionKind.CONFIRMED and not self.name:
             raise ValueError("CONFIRMED kräver ett varunamn (annars UNKNOWN_PRODUCT)")
+        if self.details and self.kind is not ActionKind.CONFIRMED:
+            raise ValueError("details hör bara till CONFIRMED")
 
 
 def _clamp01(value: float) -> float:

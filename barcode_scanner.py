@@ -90,6 +90,8 @@
 #     så att t.ex. en C#-tjänst kan bygga applikationslogiken ovanpå. Protokoll: docs/ROSTVAGLEDNING.md.
 # 31. Enhetstester i tests/ (python3 -m unittest discover -s tests -t .). Uppspelning mot gamla loggar:
 #     python3 -m voice_guidance.replay logs/scan_*.jsonl
+# 32. Kartans fält "info" (valfritt, text eller lista med högst 2 delar) läses upp efter namnet:
+#     "Tomatpure. 140 gram. Hylla 3." För lång info stoppar starten med en förklaring. (2026-11-04)
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
@@ -128,6 +130,7 @@ import zxingcpp
 
 from scan_filters import FILTER_TEXT, depth_plausible, expected_depth, is_thin, modules_for, size_from_corners
 from voice_guidance import AimConvention, GuidanceMode, create_session
+from voice_guidance.catalog import parse_details
 
 DEFAULT_MAP = "kartor/produkter.geojson"
 WARMUP_S = 10               # försök räknas först efter detta (autofokus och exponering ställer in sig)
@@ -180,12 +183,17 @@ def load_products(path):
             print(f"⚠️  Hoppar över {p.get('namn', '?')}: ogiltig streckkod {p.get('ean')!r}")
             continue
         x, y = feat["geometry"]["coordinates"][:2]   # geometrin är sanningen, inte attributen
+        try:
+            info = parse_details(p.get("info"))       # läses upp efter namnet (ändring 32)
+        except ValueError as e:
+            sys.exit(f"❌ {p.get('namn', '?')} i kartan {path}: {e}")
         products.setdefault(ean, []).append({
             "namn": p.get("namn", "?"),
             "x": float(x),
             "y": float(y),
             "ligger_pa": p.get("ligger_pa", "okänd plats"),
             "facing": p.get("facing", ""),
+            "info": info,
         })
 
     if not products:
