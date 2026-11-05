@@ -1,6 +1,6 @@
 # HANDOFF: Vision-5 (till nästa agent)
 
-Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätserien (avsnitt 3, 4, 6, 7 och 10). Avsnitt 7 reviderades därefter efter en genomgång med Elias (ny ordning, ingen deadlinepress). **Uppdaterad 2026-10-27** efter fokustesterna 18 och 20/10 och filtertestet 27/10 (avsnitt 0, 5, 6, 7, 9, 10 och nytt avsnitt 11 med arbetsloggarna som PDF i `docs/`). **Uppdaterad 2026-10-29** efter varutesterna (kaffefilter, Coca-Cola med EAN-8): avsnitt 3, 6, 7, 10 och 11. **Uppdaterad 2026-11-03** efter att röstvägledningen byggts (PR #16): avsnitt 1, 3, 7, 9, 10 och 11. Läs hela filen innan du gör något. Den beskriver vad projektet är, vad som är gjort, hur säkra vi är på varje resultat, vad som är på gång och **varför**. Filen innehåller medvetet inga rumsmått, koordinater, foton eller personnamn: repot är publikt.
+Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätserien (avsnitt 3, 4, 6, 7 och 10). Avsnitt 7 reviderades därefter efter en genomgång med Elias (ny ordning, ingen deadlinepress). **Uppdaterad 2026-10-27** efter fokustesterna 18 och 20/10 och filtertestet 27/10 (avsnitt 0, 5, 6, 7, 9, 10 och nytt avsnitt 11 med arbetsloggarna som PDF i `docs/`). **Uppdaterad 2026-10-29** efter varutesterna (kaffefilter, Coca-Cola med EAN-8): avsnitt 3, 6, 7, 10 och 11. **Uppdaterad 2026-11-03** efter att röstvägledningen byggts (PR #16): avsnitt 1, 3, 7, 9, 10 och 11. **Uppdaterad 2026-11-05** efter de första proven med röst på Pi:n och felsökningen av kameran (Y-adaptern var trasig), PR #19–#28: avsnitt 0, 1, 3, 5, 6, 7, 9, 10 och 11. Läs hela filen innan du gör något. Den beskriver vad projektet är, vad som är gjort, hur säkra vi är på varje resultat, vad som är på gång och **varför**. Filen innehåller medvetet inga rumsmått, koordinater, foton eller personnamn: repot är publikt.
 
 ---
 
@@ -9,9 +9,11 @@ Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätseri
 - **Språk:** svenska. Ärlig, konkret feedback. Små tydliga delmål, ett steg i taget ("vi tar en sak i taget").
 - **Visionen byggs hel.** Elias vill inte ha en nedskuren version. Idéer som parkeras ska skrivas ned, inte ignoreras.
 - **Elias är student och kör testerna själv på en Raspberry Pi.** Du ser inte hårdvaran. Allt du vet kommer från det Elias klistrar in (terminalutskrifter, bilder). Be om utskrift, gissa inte.
-- **Ingen kodändring utan att Elias bett om den.** Föreslå först. Elias har uttryckligen sagt: "nej gör inte nya ändringar" när jag ändrade oombedd. När Elias säger "ja gör så" till ett konkret förslag är det klartecken för just det.
+- **Ingen kodändring utan att Elias bett om den.** Föreslå först. Elias har uttryckligen sagt: "nej gör inte nya ändringar" när jag ändrade oombedd. När Elias säger "ja gör så" till ett konkret förslag är det klartecken för just det. **Igen 5/11:** "vad har du ändrat, du har inte sagt om du får ändra heller", efter att egna tillägg (korgens regler, "Redo för nästa vara") byggts och mergats utan fråga. Arbetssätt sedan dess: lägg fram ett konkret förslag (gärna en tabell med före/nu), bygg och merga först när Elias säger "kör". Skilj i svaret på vad Elias bad om och vad du själv valt.
+- **Användarperspektivet först (Elias, 5/11):** "ingen användare kommer ha det så idealt som vi har det". Tester på stöd i perfekt läge visar bara bästa fall. Röstens kommandon ska vara **korta och enkla handgrepp** för någon som inte ser, avstånd i **armlängd**, inte centimeter.
 - **Säg alltid vad du ändrat och varför**, och kommentera det i filhuvudet (de numrerade ändringslistorna i `barcode_scanner.py` är mönstret).
 - **Vanliga misstag att undvika** (alla har hänt):
+  - Att leta i koden när hårdvaran krånglar. 5/11 kraschade kameran i timmar; gammal och ny kod kraschade likadant, och felet var Y-adaptern. **Kör den gamla koden och läs `dmesg` först.** Anta inte vilken strömkälla eller uppställning Elias har: fråga.
   - Att dra slutsatser innan man mätt. Regel: **testa först, spekulera sedan.**
   - Att presentera beräknade siffror som mätta. Markera alltid: *uppmätt / beräknat / hypotes*.
   - Att ge råd som skapar ett nytt fel (jag föreslog att höja kameran med saker under, och det lutade uppställningen och förstörde flera körningar). Elias hittade felet själv.
@@ -32,9 +34,9 @@ Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätseri
 - Systemet får **aldrig säga "fri väg"** (det går inte att veta).
 
 ### Git-arbetssätt (Elias vill ha allt på `main`)
-- Utveckla på grenen `claude/affectionate-pasteur-gero98`, pusha, skapa PR mot `main` och mergea. Elias har bett om detta: "varje gång vi ändrar så ska det finnas där på main".
+- Utveckla på grenen sessionen anger (3–5/11: `claude/tender-carson-khrm7l`; tidigare `claude/affectionate-pasteur-gero98`), pusha, skapa PR mot `main` och mergea. Elias har bett om detta: "varje gång vi ändrar så ska det finnas där på main".
 - Efter att en PR är mergad: starta om grenen från `main` (samma namn):
-  `git fetch origin main && git checkout -B claude/affectionate-pasteur-gero98 origin/main`
+  `git fetch origin main && git checkout -B <grenen> origin/main` (om en reset nekas: `git merge --ff-only origin/main`)
 - `mcp__github__merge_pull_request` kräver **hela 40-tecken-SHA** i `expectedHeadSha` (`git rev-parse HEAD`).
 - Commit-fot och PR-fot följer sessionens attributionsinstruktion.
 - Ingen PR-mall finns i repot.
@@ -50,7 +52,7 @@ Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätseri
 
 **Hårdvara**
 - Raspberry Pi 5, projektet ligger i `~/ai_glasses` med virtuell miljö (`source venv/bin/activate`).
-- Luxonis OAK-D Lite (DepthAI 2.33), går idag på **USB HIGH (USB2)**, troligen Y-adaptern eller kabeln. Kontrollera med `lsusb -t` (5000M = USB3, 480M = USB2).
+- Luxonis OAK-D Lite (**DepthAI 2.29.0.0 på Pi:n**, kontrollerat 5/11; tidigare stod 2.33 här, det var fel), går på **USB HIGH (USB2)**. **Y-adaptern var trasig (5/11)** och kameran sitter nu direkt i Pi:n. USB3 utan Y-adaptern är inte prövat: `lsusb -t` med kameran i en blå port (5000M = USB3, 480M = USB2).
 - Piper TTS (`sv_SE-alma-medium`) via `pw-play`; Logitech G435-headset med USB-dongel.
 - Gemini 2.5 Flash (`google-genai`).
 - Strömförsörjning: Baseus 65 W-powerbank (se avsnitt 5).
@@ -60,8 +62,8 @@ Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätseri
 | Fil | Ansvar |
 |---|---|
 | `detect_spatial.py` | Huvudloop: YOLO + djup på kameran, akutlarm, Gemini-knapp |
-| `audio_manager.py` | Prioritetskö för ljud (TTL per nivå, akutlarm avbryter, minst 0,7 s uppspelning först) |
-| `tts_engine.py` | Piper som en process (`--json-input`), WAV-cache i `cache/tts/`, låst till kärna 2–3. `--prewarm` genererar 248 fraser (241 akut + 7 vägledning) |
+| `audio_manager.py` | Prioritetskö för ljud (TTL per nivå, akutlarm avbryter, minst 0,7 s uppspelning först). `speak(wav=…, ttl=…)` spelar en färdig fil med egen bäst-före (pipet, 5/11) |
+| `tts_engine.py` | Piper som en process (`--json-input`), WAV-cache i `cache/tts/`, låst till kärna 2–3. `--prewarm` genererar akutfraserna, vägledningens fasta fraser och bekräftelserna för varorna i `kartor/produkter.geojson`. **Kör den igen efter varje `git pull` som ändrar fraser och när kartan ändras** |
 | `phrases.py` | Fraser och avståndsformat (stil G: "Bil, 0,6 meter."), och röstvägledningens fraser |
 | `gemini_service.py` | Anrop till Gemini, timeout 10 s via `HttpOptions` (millisekunder) |
 | `telemetry_logger.py`, `analyze_telemetry.py` | Spänning (`EXT5V_V`), `throttled`, temperatur, ljudkö; analys av latens m.m. |
@@ -69,8 +71,8 @@ Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätseri
 | `barcode_scanner.py` | **Rumstestet:** streckkod → karta → position. Se avsnitt 3–4 |
 | `scan_filters.py` | Höjd- och djupfilter och modulantal (EAN-13/UPC-A 95, EAN-8 67). Bara standardbiblioteket, delas av skannern och analysen |
 | `analyze_scans.py` | Utvärderar filtren på `logs/scan_*.jsonl`. Går utan kameran |
-| `voice_guidance/` | **Röstvägledning** (3/11): `engine.py` (beslutslogik), `voice.py`, `link.py` (JSON-länk för t.ex. C#), `session.py`, `replay.py`. Se `docs/ROSTVAGLEDNING.md` |
-| `tests/` | 99 enhetstester: `python3 -m unittest discover -s tests -t .` |
+| `voice_guidance/` | **Röstvägledning** (3–5/11): `engine.py` (beslutslogik), `voice.py` (inkl. pip), `basket.py` (korgen), `catalog.py` (namn och `info`), `link.py` (JSON-länk för t.ex. C#), `session.py`, `replay.py`. Se `docs/ROSTVAGLEDNING.md` |
+| `tests/` | 146 enhetstester: `python3 -m unittest discover -s tests -t .` |
 | `docs/` | Arbetsloggar (PDF) och `ROSTVAGLEDNING.md`. Se avsnitt 11 |
 | `test_cam.py` | Gammal kameratest |
 
@@ -105,7 +107,7 @@ Mycket gick åt till att göra systemet stabilt och snabbt.
 **QGIS-fällor:** sök bara på "3006" (ett tankstreck i "EPSG:3006 – SWEREF99 TM" bröt sökningen). Avbocka "Detektera fälttyper" vid CSV-import så att inledande nollor i EAN behålls. Exportera GeoJSON med RFC7946=NO så att koordinaterna stannar i EPSG:3006.
 
 ### `barcode_scanner.py`
-Startade som ett utkast från en annan AI-agent. Granskad och rättad. Filhuvudet har numrerade ändringar 1–31 (20–27: filter och sammanfattning, PR #11; 28: EAN-8, PR #14; 29–31: röstvägledning, länk och tester, PR #16). I korthet:
+Startade som ett utkast från en annan AI-agent. Granskad och rättad. Filhuvudet har numrerade ändringar 1–34 (20–27: filter och sammanfattning, PR #11; 28: EAN-8, PR #14; 29–31: röstvägledning, länk och tester, PR #16; 32: kartans `info` läses efter namnet, PR #21; 33: korgen skrivs ut vid avslut, PR #23; 34: `--fokusruta`, PR #26). I korthet:
 - Rättade krascher (`time.timedelta`, `msg.get` på en MessageGroup) och en begränsning av skanningstakten som bara gällde efter en träff (30 avkodningar/s = strömproblem).
 - **Extended disparity** så att djup finns ner till ~0,20 m (annars ~0,35 m). **Reservruta** för djup runt kodens yta.
 - `--diag`: sparar en bild varannan sekund i `logs/snapshots/` (max 60) med ljus- och skärpevärde, och grön ram runt funna koder.
@@ -188,7 +190,9 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 ## 5. Strömmen
 
 - Powerbanken ger 15 W. Pi 5 vill ha 25 W (och ger bara 600 mA till USB utan 5 A-strömförsörjning). Rumstestet fungerar ändå, men håll koll på `throttled` efter varje körning (`vcgencmd get_throttled`; `0x0` = ingen underspänning sedan start).
-- Elias planerade att köpa batterier/UPS HAT och en riktig strömförsörjning (officiella 27 W) efter lönen den 25:e. **Inte köpt än (27/10), av ekonomiska skäl.** Powerbanken räcker för skannertesterna (`throttled=0x0` hela tiden). **Kontrollera vid valet** att USB-effekten räcker för kameran.
+- **5/11: Y-adaptern var trasig.** Med den kraschade kameran efter 10–30 s (`error -71`, "Maybe the USB cable is bad?" i `dmesg`), även med nätadapter och gammal kod. Utan den, på nätadaptern: ingen krasch, 5,07–5,12 V, `throttled=0x0`. Kameran drar nu ström genom Pi:n, som har `usb_max_current_enable=1` (full USB-ström). **På powerbanken utan Y-adapter är det inte prövat.** Detaljer: `docs/Vision5_rostvagledning_pa_pi_2026-11-05.pdf`.
+- **Elias beställer en UPS-HAT för Pi 5 med 5 V/6 A och fyra 21700-celler (5/11).** Då behövs ingen Y-adapter. Den väger runt 350 g med batterier (beräknat): lägg den i ryggsäcken eller på bältet, inte i headsetet. Mät spänningen under skannern när den kommit.
+- Tidigare plan: batterier/UPS HAT och en riktig strömförsörjning (officiella 27 W) efter lönen den 25:e. **Inte köpt 27/10, av ekonomiska skäl.** Powerbanken räcker för skannertesterna (`throttled=0x0` hela tiden). **Kontrollera vid valet** att USB-effekten räcker för kameran.
 - Mätning är ogiltig om `throttled` ändras mellan körningar (Pi:n sänker då processorhastigheten, och det ser ut som att avståndet är problemet).
 
 ---
@@ -215,7 +219,18 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 
 **Tre tolkningar som drogs tillbaka (upprepa dem inte):** "ett fast linsvärde ~77 räcker för armlängd", "filtret kastar bara ~10 % av rätta, det märks knappt" (gäller inte vid gränsen), "en lägre höjdgräns stoppar fel utan rätta" (rätta kan också vara 1 px).
 
-**Pi:n kan tappa wifi** (hände 27/10, `vision-pi1.local` gick inte att nå). Se avsnitt 9.
+**Röstvägledningen på Pi:n (4–5/11), uppmätt:**
+
+| Fynd | Status |
+|---|---|
+| Rösten fungerar hela vägen: tips, "lite närmare"/riktning, namn med `info` och "Tillagd.", "Redo för nästa vara.". Första synliga kod till namn 3–5 s (tre körningar). Inget fel namn | Uppmätt |
+| Replay 81 loggar: 0 fel vara, både med och utan tunna läsningar i konfliktregeln (43 mot 44 bekräftelser) | Uppmätt |
+| **Kameran läser bara 1–7 % av bildrutorna när varan hålls i handen** (autofokus letade 0–95). Det kan ta en minut innan något läses | Uppmätt; orsaken är inte mätt (fokus, rörelse, ljuset vid 16-tiden) |
+| Pipet hördes aldrig: tunna läsningar är för få (4 på 4 min) | Uppmätt |
+| 4K gav 3,4 px/modul på 0,29 m, 1080p 3,6 på 0,27 m. 4K borde ge ungefär det dubbla | Uppmätt, inte förklarat |
+| `--fokusruta` | Inte prövad på kameran |
+
+**Pi:n kan tappa wifi** (hände 27/10, `vision-pi1.local` gick inte att nå). Se avsnitt 9. **venv:** efter en omstart saknas `(venv)` i prompten och skannern säger `No module named 'cv2'`: kör `source venv/bin/activate`.
 
 **Test i uppställning att använda:** **koden nära mitten av bilden** (annars fokuserar autofokus på bakgrunden), köket i dagsljus, fönstret bakom kameran, **bara testobjektet i bild**, kameran plant, paketet rakt upp på ett stabilt stöd med rak framsida mot kameran, **tejpmarkerad bas för paketet och kamerans fötter** så att uppställningen kan upprepas. Mät vinkeln med mobilens vattenpass. Skriv ner varje ändring (en sak i taget). Mät avstånd med djupet, inte måttbandet.
 
@@ -224,6 +239,15 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 ## 7. Det jag tänkte göra härnäst, och varför
 
 **Tidsram (2026-10-17):** exjobbet börjar först nästa termin, så det finns ingen deadline att stressa mot. En person kommer då att hjälpa Elias med koden. Prioritera därför att det som byggs nu är **förstått, repeterbart och dokumenterat** framför att hinna med många funktioner. Ordningen nedan reviderades efter en genomgång samma dag: punkt 2 är ny, positionstestet är flyttat fram och vinkel och djupkontroll är sammanslagna i punkt 5. Kodändringar föreslås först och görs när Elias säger ja.
+
+**Status 5/11: röstvägledningen är körd och fungerar på Pi:n (PR #19–#28).** Vad som ändrats, vad som är uppmätt och vad som är osäkert: `docs/Vision5_rostvagledning_pa_pi_2026-11-05.pdf`. **Nästa steg, i ordning:**
+1. Kameran utan Y-adapter, nätadaptern, bra ljus. `git pull && sync`, `python3 tts_engine.py --prewarm`.
+2. `lsusb -t` med kameran i en blå port: USB3 utan Y-adaptern?
+3. A/B 60 s utan och med `--fokusruta` (samma ljus och avstånd), jämför andelen bildrutor med kod. Läsfrekvensen (1–7 %) är det största problemet nu.
+4. Blundande test: fem försök från bortvänd kod, tid till "Tillagd.".
+5. 1080p mot 4K på samma avstånd (px/modul ser fel ut).
+6. **Förslag som väntar på Elias beslut:** avståndsvägledning med djupkameran ("Närmare"/"Längre bort" även utan kod), "Bra, håll stilla." när koden skymtar, OpenCV-detektorn för pip och riktning (B, mät först), CAD-fil till ett 3D-utskrivet headset. **Avböjt:** låst fokus som standard (användaren kan hålla varan på helt andra avstånd) och kvartsvarv i tipsen.
+7. Butikstester när ICA ger tillstånd.
 
 **Status 3/11: röstvägledningen är byggd (PR #16) men inte körd på Pi:n.** Paketet `voice_guidance/`, `--vagledning text|tal`, `--sikte huvud|hand`, `--lank PORT` och 99 enhetstester. Regler, protokoll och kända begränsningar: `docs/ROSTVAGLEDNING.md`. Arbetslogg: `docs/Vision5_rostvagledning_2026-11-03.pdf`. **Nästa steg, i ordning:**
 1. **`python3 -m voice_guidance.replay logs/scan_*.jsonl --karta kartor/produkter.geojson`** på Pi:n. Visar vad motorn hade sagt under alla gamla körningar och **hur ofta den hade sagt fel vara** (ska vara 0, annars justeras reglerna innan något testas med röst). Skicka utskriften till Claude.
@@ -311,6 +335,9 @@ python3 -m unittest discover -s tests -t .                      # enhetstesterna
 python3 -m voice_guidance.replay logs/scan_*.jsonl --karta kartor/produkter.geojson   # vad hade vägledningen sagt? Felkod 1 om någon bekräftelse var fel
 python3 barcode_scanner.py --diag --4k --facit <EAN> --vagledning text   # röstvägledning, bara utskrift
 python3 barcode_scanner.py --diag --4k --facit <EAN> --vagledning tal --sikte huvud   # med röst (kör tts_engine.py --prewarm först)
+python3 barcode_scanner.py --vagledning tal --sikte hand --filter --diag --fokusruta   # som i proven 5/11 (--fokusruta: autofokus bara mitt i bilden)
+dmesg | tail -30                                                # USB-fel vid kamerakrasch (error -71 = koppling/sladd)
+echo 'cd ~/ai_glasses && source venv/bin/activate' >> ~/.bashrc   # venv aktiveras automatiskt i nya terminaler
 python3 barcode_scanner.py --lank 5555                          # JSON-länk på 127.0.0.1:5555 för andra program (se docs/ROSTVAGLEDNING.md)
 vcgencmd get_throttled; vcgencmd pmic_read_adc EXT5V_V          # ström
 lsusb -t                                                        # USB3 (5000M) eller USB2 (480M)
@@ -328,9 +355,10 @@ Elias hämtar bilder genom att högerklicka i VS Code och välja **Download**. S
 ---
 
 ## 10. Öppna frågor till Elias
-- Riktningskonventionen: `--sikte huvud` (vrid huvudet mot koden, standard) eller `hand` (flytta varan)? Välj **en**.
-- Vad visade `voice_guidance.replay` på de gamla loggarna? Hur många bekräftelser, och hur många fel vara (ska vara 0)?
-- Stämmer beskeden med det som händer när du lyssnar (`--vagledning tal`)? Låter något för ofta, för sällan eller för sent?
+- Riktningskonventionen: Elias kör `--sikte hand` i proven (kameran stilla, varan i handen). Ska `hand` bli standard?
+- Är tipsen lätta att följa blundande? Är 10 s mellan dem lagom i längden? Saknas något kommando?
+- Hjälper `--fokusruta`? Avståndsvägledning med djupet, "Bra, håll stilla", detektorn: vilka ska byggas?
+- ~~Replay på de gamla loggarna~~ Gjort 4–5/11: 0 fel vara.
 - Grannvaror på en hylla: räknas två produkter nära varandra som konflikt (`conflict_radius`)? Testas i butiken.
 - ~~Ska en tunn läsning ge "lite närmare" i stället för tystnad~~ Beslutat och byggt 3/11.
 - Finns en vara med kort streckkod (13 siffror, korta streck) att testa höjdfiltret på? EAN-8 läses sedan ändring 28.
@@ -338,7 +366,7 @@ Elias hämtar bilder genom att högerklicka i VS Code och välja **Download**. S
 - Vad ska uppställningen heta när den blir standard (tejpmärken, stöd, bakgrund), så att resultaten går att upprepa?
 - Vilken butik/vilka butiker finns det tillgång till för att spana in etiketter?
 - Röstvägledningen: ton, ord eller båda? Vilken konvention för riktning?
-- När blir det råd med strömförsörjning och vilken UPS HAT/PSU? (Inte köpt 27/10.)
+- UPS-HAT 5 V/6 A beställs (5/11). Ny Y-adapter behövs inte med den.
 - Ska skärpa i kodens ruta loggas (se avsnitt 7, ursprunglig punkt 3)? Elias har inte tagit ställning.
 
 *Det fullständiga samtalsunderlaget (om det finns kvar i sessionens miljö) ligger under `~/.claude/projects/` för sessionen. Räkna inte med att det finns: miljön är tillfällig. Rådata (`logs/scan_*.jsonl`) ligger bara på Pi:n.*
@@ -351,7 +379,8 @@ Nyaste överst.
 
 | Fil | Innehåll |
 |---|---|
-| `docs/Vision5_rostvagledning_2026-11-03.pdf` | Arbetslogg: vad som byggdes och varför, arkitekturen, hur det är testat (99 tester, mutationskontroll), vad som inte är testat, nästa steg |
+| `docs/Vision5_rostvagledning_pa_pi_2026-11-05.pdf` | Röstvägledningen på Pi:n 4–5/11: vad som hände i varje prov, felsökningen av kamerakrascherna (Y-adaptern), ändringarna PR #19–#28, vad som är osäkert, nästa steg |
+| `docs/Vision5_rostvagledning_2026-11-03.pdf` | Arbetslogg 3/11: vad som byggdes och varför, arkitekturen, hur det är testat (99 tester, mutationskontroll), vad som inte är testat, nästa steg |
 | `docs/Vision5_varutest_del2_2026-10-29.pdf` | Varutest del 2 (4K): Coca-Cola med EAN-8 läser till 0,71 m, kaffefiltret rakt och stabilt ger inga fel. **Rättar flera slutsatser i del 1** |
 | `docs/Vision5_varutest_kaffefilter_2026-10-29.pdf` | Varutest del 1 (4K): kaffefilter med 22 felläsningar i en lutande, instabil uppställning, förslag på konfliktregel. Läs med rättelserna i del 2 |
 | `docs/Vision5_filter_pa_pi_2026-10-27.pdf` | Filtren på Pi:n: höjden mäter osäkerhet, inte rätt/fel; djupet fel bara första sekunden; hälften av bilderna når Pi:n |
