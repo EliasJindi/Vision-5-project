@@ -134,7 +134,7 @@ class ScannerMainTest(unittest.TestCase):
         os.chdir(self.folder.name)
         try:
             with mock.patch.object(sys, "argv", argv), mock.patch.object(barcode_scanner, "dai", fake_dai), \
-                    mock.patch.object(barcode_scanner, "build_pipeline", return_value=None), \
+                    mock.patch.object(barcode_scanner, "build_pipeline", return_value=None) as self.build, \
                     mock.patch.object(barcode_scanner, "time", FakeClock()), contextlib.redirect_stdout(out):
                 barcode_scanner.main()
         finally:
@@ -175,6 +175,29 @@ class ScannerMainTest(unittest.TestCase):
         with mock.patch.object(session_module, "_voice_speaker", return_value=session_module.ConsoleSpeaker()):
             out = self.run_scanner("--lank", "0")
         self.assertIn("Länk: 127.0.0.1:", out)
+
+    def test_focus_region_flag_reaches_the_pipeline_and_is_shown(self):
+        out = self.run_scanner("--fokusruta")
+        self.assertIn("bara rutan i mitten (40 % av bredd och höjd)", out)
+        self.build.assert_called_once_with(uhd=False, focus=None, focus_share=0.4)
+        self.run_scanner("--fokusruta", "0.25", "--4k")
+        self.build.assert_called_once_with(uhd=True, focus=None, focus_share=0.25)
+
+    def test_without_the_flag_autofocus_is_unchanged(self):
+        self.run_scanner()
+        self.build.assert_called_once_with(uhd=False, focus=None, focus_share=None)
+
+    def test_focus_region_and_locked_focus_cannot_be_combined(self):
+        for flags in (("--fokusruta", "--fokus", "70"), ("--fokusruta", "0.05"), ("--fokusruta", "1.5")):
+            with self.subTest(flags=flags), self.assertRaises(SystemExit):
+                self.run_scanner(*flags)
+
+    def test_focus_region_is_centred(self):
+        import barcode_scanner
+        self.assertEqual(barcode_scanner.focus_region(1920, 1080, 0.4), (576, 324, 768, 432))
+        self.assertEqual(barcode_scanner.focus_region(3840, 2160, 1.0), (0, 0, 3840, 2160))
+        with self.assertRaises(ValueError):
+            barcode_scanner.focus_region(1920, 1080, 0)
 
     def test_invalid_port_is_rejected(self):
         with self.assertRaises(SystemExit):
