@@ -13,8 +13,8 @@ Reglerna, i prioritetsordning (se docs/ROSTVAGLEDNING.md):
   2. Bekräfta en vara först när den lästs säkert (inte tunn) flera gånger i rad och ingen konflikt råder.
   3. Annars, om koden syns men inte är säker: säg vart den ska (om den ligger i kanten, eftersom
      autofokus följer bildens mitt) eller "lite närmare".
-  4. Syns ingen kod alls på ett tag: tips i tur och ordning ("håll varan mitt framför dig", "vänd varan sakta",
-     "håll varan ungefär 30 cm bort"), först tätt och sedan glesare, utan slut tills en kod syns. Tystnad
+  4. Syns ingen kod alls på ett tag: korta tips i tur och ordning ("håll varan framför dig, en halv armlängd
+     bort", "vrid varan sakta", "vänd varan upp och ner"), först tätt och sedan glesare, utan slut tills en kod syns. Tystnad
      lämnade användaren ensam i en minut (Elias, 4-5/11).
      Efter en lyckad scanning sägs i stället "redo för nästa vara" en gång, när varan varit borta en stund
      (användaren har då kanske ingen vara i handen, så "vänd varan" vore fel). Elias 5/11.
@@ -36,7 +36,7 @@ from .model import (ActionKind, CodeRead, FrameObservation, GuidanceAction, Poin
 
 _NEVER = float("-inf")
 _CONFIRMATIONS = (ActionKind.CONFIRMED, ActionKind.UNKNOWN_PRODUCT)
-_NO_CODE_HINTS = (ActionKind.NO_CODE, ActionKind.NO_CODE_TURN, ActionKind.NO_CODE_DISTANCE)   # i den ordningen
+_NO_CODE_HINTS = (ActionKind.NO_CODE, ActionKind.NO_CODE_TURN, ActionKind.NO_CODE_FLIP)   # i den ordningen
 _AIMS = (ActionKind.CLOSER, ActionKind.CODE_LEFT, ActionKind.CODE_RIGHT, ActionKind.CODE_ABOVE,
          ActionKind.CODE_BELOW)
 
