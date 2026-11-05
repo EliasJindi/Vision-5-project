@@ -25,10 +25,29 @@ class GuidanceSessionTest(unittest.TestCase):
         self.assertIsNone(session.on_frame(1.0, [record(1.0, filter=[])]))
         action = session.on_frame(1.5, [record(1.5, filter=[])])
         self.assertEqual(action.kind, ActionKind.CONFIRMED)
-        self.assertEqual(speaker.texts, ["Tomatpure."])
+        self.assertEqual(speaker.texts, ["Tomatpure. Tillagd."])
         guidance = link.of_type("guidance")
         self.assertEqual(guidance, [{"type": "guidance", "t": 1.5, "action": "confirmed", "ean": EAN_A,
-                                     "name": "Tomatpure", "details": [], "text": "Tomatpure."}])
+                                     "name": "Tomatpure", "details": [], "basket": "added",
+                                     "text": "Tomatpure. Tillagd."}])
+        self.assertEqual(session.basket.items(), [(EAN_A, "Tomatpure")])
+
+    def test_the_same_product_scanned_again_is_not_added_twice(self):
+        session, link, speaker = build()
+        for t in (1.0, 1.5, 10.0, 10.5):   # borta i över 5 s mellan: bekräftas igen
+            session.on_frame(t, [record(t, filter=[])])
+        self.assertEqual(speaker.texts, ["Tomatpure. Tillagd.", "Tomatpure. Finns redan i korgen."])
+        self.assertEqual(len(session.basket), 1)
+        self.assertEqual([g["basket"] for g in link.of_type("guidance")], ["added", "already"])
+
+    def test_unknown_products_and_guidance_never_go_in_the_basket(self):
+        session, link, speaker = build()
+        for t in (1.0, 1.5):
+            session.on_frame(t, [record(t, ean="7311043006847", filter=[])])
+        session.on_frame(5.0, [record(5.0, corners=THIN_CORNERS, filter=["tunn"])])
+        self.assertEqual(speaker.texts[0], "Okänd vara.")
+        self.assertEqual(len(session.basket), 0)
+        self.assertTrue(all(g["basket"] is None for g in link.of_type("guidance")))
 
     def test_every_record_is_published_as_a_read_event(self):
         session, link, _ = build()
@@ -55,7 +74,7 @@ class GuidanceSessionTest(unittest.TestCase):
         self.assertIsNone(session.on_frame(5.0, []))
         session.on_frame(6.0, [record(6.0, filter=[])])
         session.on_frame(6.5, [record(6.5, filter=[])])
-        self.assertEqual(speaker.texts, ["Tomatpure."])   # bara en bekräftelse: första läsningen var ensam
+        self.assertEqual(speaker.texts, ["Tomatpure. Tillagd."])   # bara en bekräftelse: första läsningen var ensam
 
     def test_a_broken_record_is_skipped_with_one_warning(self):
         session, link, _ = build()

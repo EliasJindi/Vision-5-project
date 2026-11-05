@@ -283,11 +283,31 @@ class NoCodeTest(unittest.TestCase):
         self.assertEqual(self.engine.update(frame(31.0, read(thin=True))).kind, ActionKind.CLOSER)
         self.assertEqual(self.run_empty(31.5, 40.0), [(39.0, ActionKind.NO_CODE)])   # 8 s efter koden
 
-    def test_no_prompt_after_a_successful_scan(self):
+    def test_after_a_successful_scan_it_says_ready_once_instead_of_no_code(self):
         self.engine.update(frame(0.0, read()))
         self.engine.update(frame(0.5, read()))                      # bekräftad
         self.engine.update(frame(1.0, read()))                      # varan syns fortfarande en stund
-        self.assertEqual(self.run_empty(1.5, 60.0), [])             # varan lagd åt sidan: ingen tjat
+        self.assertEqual(self.run_empty(1.5, 90.0), [(16.0, ActionKind.READY)])   # 15 s efter sista läsningen
+
+    def test_ready_waits_while_the_confirmed_product_is_still_in_view(self):
+        self.engine.update(frame(0.0, read()))
+        self.engine.update(frame(0.5, read()))
+        for t in range(1, 30):                                      # varan ligger kvar i bild
+            self.assertIsNone(self.engine.update(frame(float(t), read())), t)
+
+    def test_a_new_code_before_ready_cancels_it(self):
+        self.engine.update(frame(0.0, read()))
+        self.engine.update(frame(0.5, read()))
+        self.engine.update(frame(10.0, read(EAN_B, thin=True)))     # nästa vara dyker upp
+        said = self.run_empty(10.5, 40.0)
+        self.assertNotIn(ActionKind.READY, [k for _, k in said])
+        self.assertEqual(said, [(18.0, ActionKind.NO_CODE), (28.0, ActionKind.NO_CODE)])
+
+    def test_ready_after_zero_never_says_ready(self):
+        engine = GuidanceEngine(CATALOG, GuidanceConfig(ready_after_s=0))
+        engine.update(frame(0.0, read()))
+        engine.update(frame(0.5, read()))
+        self.assertTrue(all(engine.update(frame(float(t))) is None for t in range(1, 60)))
 
     def test_a_new_product_after_a_successful_scan_rearms_the_prompt(self):
         self.engine.update(frame(0.0, read()))
@@ -306,7 +326,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_invalid_values_are_rejected(self):
         for bad in ({"confirm_reads": 0}, {"confirm_window_s": 0}, {"min_interval_s": -1}, {"conflict_escalate_s": 0},
-                    {"no_code_after_s": 0}, {"no_code_repeat_s": -1}, {"no_code_max": -1}, {"cue_interval_s": -1}, {"cue_quiet_s": -0.1},
+                    {"no_code_after_s": 0}, {"no_code_repeat_s": -1}, {"no_code_max": -1}, {"cue_interval_s": -1}, {"ready_after_s": -1}, {"cue_quiet_s": -0.1},
                     {"deadzone_x": 0}, {"deadzone_y": 0.6}, {"conflict_radius": 0}):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):

@@ -23,6 +23,14 @@ class PhrasesTest(unittest.TestCase):
                          "Tomatpure. 140 gram. Hylla 3.")
         self.assertEqual(guidance_text("confirmed", name="Mjölk.", details=("Laktosfri!",)), "Mjölk. Laktosfri!")
 
+    def test_the_basket_is_said_last(self):
+        self.assertEqual(guidance_text("confirmed", name="Tomatpure", details=("500 gram",), basket="added"),
+                         "Tomatpure. 500 gram. Tillagd.")
+        self.assertEqual(guidance_text("confirmed", name="Tomatpure", basket="already"),
+                         "Tomatpure. Finns redan i korgen.")
+        with self.assertRaises(ValueError):
+            guidance_text("closer", basket="added")
+
     def test_the_cue_has_no_words(self):
         with self.assertRaises(ValueError):
             guidance_text("code_seen")
@@ -150,7 +158,9 @@ class CatalogTest(unittest.TestCase):
     def test_announcements_list_every_confirmation_once_for_prewarm(self):
         catalog = DictProductCatalog({EAN_A: [{"namn": "Tomatpure", "info": "140 gram"}, {"namn": "Tomatpure"}],
                                       "2": [{"namn": "Mjölk"}], "3": [{"namn": ""}]})
-        self.assertEqual(catalog.announcements(), ["Mjölk.", "Tomatpure. 140 gram."])
+        self.assertEqual(catalog.announcements(),
+                         ["Mjölk.", "Mjölk. Finns redan i korgen.", "Mjölk. Tillagd.", "Tomatpure. 140 gram.",
+                          "Tomatpure. 140 gram. Finns redan i korgen.", "Tomatpure. 140 gram. Tillagd."])
 
     def test_from_geojson_reads_ean_and_name(self):
         import json

@@ -92,6 +92,8 @@
 #     python3 -m voice_guidance.replay logs/scan_*.jsonl
 # 32. Kartans fält "info" (valfritt, text eller lista med högst 2 delar) läses upp efter namnet:
 #     "Tomatpure. 140 gram. Hylla 3." För lång info stoppar starten med en förklaring. (2026-11-04)
+# 33. Med --vagledning läggs bekräftade varor i en korg: "Tomatpure. 500 gram. Tillagd.", och
+#     "Finns redan i korgen." om samma vara skannas igen. Korgen skrivs ut när skannern avslutas. (2026-11-05)
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
@@ -619,6 +621,8 @@ def main():
         finally:
             session.close()
         print_summary(mode, facit, stats, log_path, args.filter)
+        if args.vagledning:
+            print(f"  {session.basket.summary()}")
 
 
 if __name__ == "__main__":

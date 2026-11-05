@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from typing import Any, List, Mapping, Optional, Protocol, Sequence, Tuple
 
-from phrases import guidance_text
+from phrases import BASKET_PHRASES, guidance_text
 
 MAX_DETAILS = 2
 MAX_DETAIL_CHARS = 40
@@ -66,12 +66,16 @@ class DictProductCatalog:
         return parse_details(candidates[0].get("info")) if candidates else ()
 
     def announcements(self) -> List[str]:
-        """Allt som kan sägas vid en bekräftelse, för att förgenerera ljudet (ingen paus första gången)."""
+        """
+        Allt som kan sägas vid en bekräftelse, för att förgenerera ljudet (ingen paus första gången):
+        med och utan korg, eftersom replay och --lank utan röst inte har någon korg.
+        """
         texts = set()
         for ean in self._products:
             name = self.name_of(ean)
             if name:
-                texts.add(guidance_text("confirmed", name=name, details=self.details_of(ean)))
+                for basket in (None, *BASKET_PHRASES):
+                    texts.add(guidance_text("confirmed", name=name, details=self.details_of(ean), basket=basket))
         return sorted(texts)
 
     @classmethod

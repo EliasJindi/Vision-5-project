@@ -41,6 +41,12 @@ GUIDANCE_PHRASES = {
     "hold_still": "Håll stilla.",
     "unknown_product": "Okänd vara.",
     "no_code": "Ingen kod. Vänd varan långsamt.",
+    "ready": "Redo för nästa vara.",
+}
+# Efter namnet, när varan lagts i korgen (voice_guidance/basket.py). Elias 5/11.
+BASKET_PHRASES = {
+    "added": "Tillagd.",
+    "already": "Finns redan i korgen.",
 }
 # Riktning. Motorn säger var koden ligger i bilden, konventionen avgör orden:
 #   head: användaren vrider huvudet mot koden.  hand: användaren flyttar varan mot bildens mitt.
@@ -57,12 +63,20 @@ def _sentence(text):
     return f"{text[:1].upper()}{text[1:]}" + ("" if text[-1:] in ".!?" else ".")
 
 
-def guidance_text(kind, convention="head", name=None, details=()):
-    """Frasen för ett vägledningsbesked. 'confirmed' kräver ett varunamn, details läses efter namnet."""
+def guidance_text(kind, convention="head", name=None, details=(), basket=None):
+    """
+    Frasen för ett vägledningsbesked. 'confirmed' kräver ett varunamn. details läses efter namnet,
+    och basket ('added'/'already') sist: "Tomatpure. 500 gram. Tillagd."
+    """
     if kind == "confirmed":
         if not name:
             raise ValueError("'confirmed' kräver ett varunamn")
-        return " ".join(_sentence(part) for part in (name, *details))
+        parts = [_sentence(part) for part in (name, *details)]
+        if basket is not None:
+            parts.append(BASKET_PHRASES[basket])
+        return " ".join(parts)
+    if basket is not None:
+        raise ValueError("basket hör bara till 'confirmed'")
     if kind in GUIDANCE_PHRASES:
         return GUIDANCE_PHRASES[kind]
     try:
