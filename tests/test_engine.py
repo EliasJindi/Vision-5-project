@@ -79,7 +79,7 @@ class AimTest(unittest.TestCase):
         self.assertEqual(self.aim(0.5, 0.5).kind, ActionKind.CLOSER)
 
     def test_inside_the_deadzone_still_asks_for_closer(self):
-        self.assertEqual(self.aim(0.65, 0.6).kind, ActionKind.CLOSER)
+        self.assertEqual(self.aim(0.62, 0.6).kind, ActionKind.CLOSER)   # dx 0,12 < 0,15, dy 0,10 < 0,25
 
     def test_code_in_each_edge_says_where_it_is(self):
         self.assertEqual(self.aim(0.10, 0.5).kind, ActionKind.CODE_LEFT)
@@ -88,10 +88,10 @@ class AimTest(unittest.TestCase):
         self.assertEqual(self.aim(0.5, 0.95).kind, ActionKind.CODE_BELOW)
 
     def test_the_axis_that_is_furthest_out_wins(self):
-        # dx = 0,35 (1,75 gånger zonen), dy = 0,30 (1,2 gånger zonen)
+        # dx = 0,35 (2,3 gånger zonen 0,15), dy = 0,30 (1,2 gånger zonen 0,25)
         self.assertEqual(self.aim(0.85, 0.80).kind, ActionKind.CODE_RIGHT)
-        # dx = 0,25 (1,25 gånger zonen), dy = 0,40 (1,6 gånger zonen)
-        self.assertEqual(self.aim(0.75, 0.10).kind, ActionKind.CODE_ABOVE)
+        # dx = 0,20 (1,3 gånger zonen), dy = 0,45 (1,8 gånger zonen)
+        self.assertEqual(self.aim(0.70, 0.05).kind, ActionKind.CODE_ABOVE)
 
     def test_the_read_nearest_the_center_is_the_target(self):
         engine = GuidanceEngine(EmptyProductCatalog())
@@ -275,13 +275,14 @@ class NoCodeTest(unittest.TestCase):
             t += step
         return said
 
-    def test_says_no_code_after_eight_seconds_and_once_more_then_stops(self):
-        self.assertEqual(self.run_empty(0.0, 60.0), [(8.0, ActionKind.NO_CODE), (18.0, ActionKind.NO_CODE)])
+    def test_says_no_code_after_four_seconds_then_every_six_three_times_in_all(self):
+        self.assertEqual(self.run_empty(0.0, 60.0),
+                         [(4.0, ActionKind.NO_CODE), (10.0, ActionKind.NO_CODE), (16.0, ActionKind.NO_CODE)])
 
     def test_a_code_starts_a_new_search(self):
-        self.run_empty(0.0, 30.0)                                   # två gånger, sedan tyst
+        self.run_empty(0.0, 30.0)                                   # tre gånger, sedan tyst
         self.assertEqual(self.engine.update(frame(31.0, read(thin=True))).kind, ActionKind.CLOSER)
-        self.assertEqual(self.run_empty(31.5, 40.0), [(39.0, ActionKind.NO_CODE)])   # 8 s efter koden
+        self.assertEqual(self.run_empty(31.5, 40.0), [(35.0, ActionKind.NO_CODE)])   # 4 s efter koden
 
     def test_after_a_successful_scan_it_says_ready_once_instead_of_no_code(self):
         self.engine.update(frame(0.0, read()))
@@ -301,7 +302,7 @@ class NoCodeTest(unittest.TestCase):
         self.engine.update(frame(10.0, read(EAN_B, thin=True)))     # nästa vara dyker upp
         said = self.run_empty(10.5, 40.0)
         self.assertNotIn(ActionKind.READY, [k for _, k in said])
-        self.assertEqual(said, [(18.0, ActionKind.NO_CODE), (28.0, ActionKind.NO_CODE)])
+        self.assertEqual(said, [(14.0, ActionKind.NO_CODE), (20.0, ActionKind.NO_CODE), (26.0, ActionKind.NO_CODE)])
 
     def test_ready_after_zero_never_says_ready(self):
         engine = GuidanceEngine(CATALOG, GuidanceConfig(ready_after_s=0))
@@ -313,7 +314,7 @@ class NoCodeTest(unittest.TestCase):
         self.engine.update(frame(0.0, read()))
         self.engine.update(frame(0.5, read()))                      # tomatpurén bekräftad
         self.engine.update(frame(20.0, read(EAN_B, thin=True)))     # en annan vara dyker upp, osäker
-        self.assertEqual(self.run_empty(20.5, 30.0), [(28.0, ActionKind.NO_CODE)])
+        self.assertEqual(self.run_empty(20.5, 30.0), [(24.0, ActionKind.NO_CODE), (30.0, ActionKind.NO_CODE)])
 
     def test_zero_disables_the_prompt(self):
         engine = GuidanceEngine(CATALOG, GuidanceConfig(no_code_max=0))

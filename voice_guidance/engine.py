@@ -13,7 +13,7 @@ Reglerna, i prioritetsordning (se docs/ROSTVAGLEDNING.md):
   2. Bekräfta en vara först när den lästs säkert (inte tunn) flera gånger i rad och ingen konflikt råder.
   3. Annars, om koden syns men inte är säker: säg vart den ska (om den ligger i kanten, eftersom
      autofokus följer bildens mitt) eller "lite närmare".
-  4. Syns ingen kod alls på ett tag: "ingen kod, vänd varan långsamt", högst två gånger per sökning.
+  4. Syns ingen kod alls på ett tag: "hittar ingen streckkod, vänd varan sakta", högst tre gånger per sökning.
      Tystnad hade lämnat användaren utan att veta om systemet söker (Elias, 4/11).
      Efter en lyckad scanning sägs i stället "redo för nästa vara" en gång, när varan varit borta en stund
      (användaren har då kanske ingen vara i handen, så "vänd varan" vore fel). Elias 5/11.
@@ -51,13 +51,13 @@ class GuidanceConfig:
     conflict_escalate_s: float = 5.0   # varar en konflikt så länge byts "håll stilla" mot "lite närmare"
     conflict_from_thin: bool = False   # tunna läsningar startar ingen konflikt: replay 5/11, 81 loggar, 0 fel vara båda
                                        # sätten, en bekräftelse till med False (köket 4/11: 4 s väntan i onödan)
-    deadzone_x: float = 0.20         # koden räknas som "i mitten" så länge den ligger inom detta från mitten
+    deadzone_x: float = 0.15         # koden räknas som "i mitten" så länge den ligger inom detta från mitten (0,20 före 5/11)
     deadzone_y: float = 0.25
-    min_interval_s: float = 1.8      # minst så här lång tid mellan två vägledningar
+    min_interval_s: float = 1.5      # minst så här lång tid mellan två vägledningar (1,8 före 5/11: "lite snabbare")
     repeat_after_s: float = 3.0      # samma vägledning upprepas inte oftare än så här
-    no_code_after_s: float = 8.0     # ingen kod på så här lång tid: "ingen kod, vänd varan" (Elias, 4/11)
-    no_code_repeat_s: float = 10.0   # ...och igen efter så här mycket till
-    no_code_max: int = 2             # högst så många gånger per sökning, sedan tyst tills en kod syns (0 = aldrig)
+    no_code_after_s: float = 4.0     # ingen kod på så här lång tid: "hittar ingen streckkod" (8 s före 5/11: för långsamt)
+    no_code_repeat_s: float = 6.0    # ...och igen efter så här mycket till (10 s före 5/11)
+    no_code_max: int = 3             # högst så många gånger per sökning, sedan tyst tills en kod syns (0 = aldrig)
     ready_after_s: float = 15.0      # "redo för nästa vara" så här länge efter att en bekräftad vara försvann (0 = aldrig)
     cue_interval_s: float = 1.0      # pip när en osäker kod syns men talet hålls tillbaka, högst så här ofta (0 = av)
     cue_quiet_s: float = 1.2         # inget pip så här snart efter tal, så att pipet inte hamnar mitt i en fras

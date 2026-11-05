@@ -40,7 +40,7 @@ GUIDANCE_PHRASES = {
     "closer": "Lite närmare.",
     "hold_still": "Håll stilla.",
     "unknown_product": "Okänd vara.",
-    "no_code": "Ingen kod. Vänd varan långsamt.",
+    "no_code": "Hittar ingen streckkod. Vänd varan sakta.",   # "Ingen kod." lät som "pinkod" (5/11)
     "ready": "Redo för nästa vara.",
 }
 # Efter namnet, när varan lagts i korgen (voice_guidance/basket.py). Elias 5/11.

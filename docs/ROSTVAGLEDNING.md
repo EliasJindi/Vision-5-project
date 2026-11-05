@@ -43,12 +43,12 @@ Motorn får en bildruta i taget och svarar med **högst ett besked**, eller tyst
 | 1 | Två **olika** koder lästes **säkert** (inte tunna) från ungefär samma ställe inom 3 s | **"Håll stilla."** Inget bekräftas under konflikten och 3 s efter. Varar den över 5 s sägs i stället **"Lite närmare."** (närmare tog bort felläsningarna 29/10, och "håll stilla" upprepat i 35 s fastnar användaren i). Är en vara redan bekräftad tiger motorn (en avvikande läsning är då troligen en felläsning) |
 | 2 | Samma vara lästes **säkert** (inte tunn) minst 2 gånger inom 2 s, ingen konflikt | **Varans namn** ("Tomatpure."), följt av kartans `info` om den finns och sist korgen: **"Tomatpure. 500 gram. Tillagd."**, eller "… Finns redan i korgen." om samma vara skannats förut (ingen dubbel i korgen av misstag; antal kommer med inköpslistan). Finns varan inte i kartan: **"Okänd vara."** Sägs en gång tills varan varit borta i 5 s |
 | 3 | Koden syns men är osäker (tunn eller ogiltig kontrollsiffra), ingen vara bekräftad | Ligger koden i bildens kant: **riktning** (autofokus följer bildens mitt). Annars **"Lite närmare."** |
-| 4 | **Ingen kod alls** på 8 s | **"Ingen kod. Vänd varan långsamt."** En gång till efter 10 s, sedan tyst tills en kod syns. Tystnad hade lämnat användaren utan att veta om systemet söker (Elias, 4/11). **Efter en lyckad läsning** sägs i stället **"Redo för nästa vara."** en gång, 15 s efter att varan senast syntes, sedan tyst tills en ny kod syns. "Vänd varan" vore fel då, användaren har kanske ingen vara i handen (Elias, 5/11) |
+| 4 | **Ingen kod alls** på 4 s | **"Hittar ingen streckkod. Vänd varan sakta."** Igen var 6:e s, högst 3 gånger, sedan tyst tills en kod syns. ("Ingen kod." lät som "pinkod" med den snabba rösten, och 8 s/10 s var för långsamt: Elias 5/11.) Tystnad hade lämnat användaren utan att veta om systemet söker (Elias, 4/11). **Efter en lyckad läsning** sägs i stället **"Redo för nästa vara."** en gång, 15 s efter att varan senast syntes, sedan tyst tills en ny kod syns. "Vänd varan" vore fel då, användaren har kanske ingen vara i handen (Elias, 5/11) |
 | 5 | Annars (en säker läsning som väntar på sin andra) | Tystnad |
 
 **Pip** (4/11): när regel 3 vill säga något men takten håller tillbaka talet hörs i stället ett kort pip (70 ms), högst ett per sekund och inte närmare än 1,2 s efter tal. Användaren hör då att en kod syns och kan sluta vrida, utan att rösten pratar hela tiden. Pipet skjuter inte upp nästa vägledning. Inget pip under en konflikt, när varan redan är bekräftad, eller när ingen kod syns. **Prövat 5/11: pipet hördes aldrig.** Tunna läsningar är för få (4 på 4 min), och när koden syns men är suddig hittar zxing ingenting alls. Pipet behöver en detektor som ser *att* en kod finns utan att läsa den (OpenCV:s `BarcodeDetector`), som ska mätas innan den används. Ett pip som fått vänta mer än 0,6 s i ljudkön (t.ex. bakom ett akutlarm) slängs, eftersom det då inte längre stämmer med bilden.
 
-Takt: minst 1,8 s mellan beskeden, och samma besked upprepas inte oftare än var 3:e s. Bekräftelsen går före (den är poängen med flödet). Allt ligger i `GuidanceConfig`:
+Takt: minst 1,5 s mellan beskeden, och samma besked upprepas inte oftare än var 3:e s. Bekräftelsen går före (den är poängen med flödet). Allt ligger i `GuidanceConfig`:
 
 | Värde | Standard | Varför |
 |---|---|---|
@@ -56,12 +56,12 @@ Takt: minst 1,8 s mellan beskeden, och samma besked upprepas inte oftare än var
 | `lost_after_s` | 5,0 s | Efter så lång tid utan läsning räknas varan som borta. Nära pixelgränsen kommer läsningar glest, och med 2 s började rösten guida om en vara som redan sagts |
 | `conflict_window_s` / `conflict_radius` / `conflict_hold_s` | 3,0 s / 0,10 / 3,0 s | **Gissat, ska finjusteras.** Se nedan |
 | `conflict_escalate_s` | 5,0 s | Efter så lång konflikt byts "håll stilla" mot "lite närmare" |
-| `deadzone_x` / `deadzone_y` | 0,20 / 0,25 | Hur långt från mitten koden får ligga innan riktning sägs |
-| `min_interval_s` / `repeat_after_s` | 1,8 / 3,0 s | Pratar hellre för lite än för mycket |
+| `deadzone_x` / `deadzone_y` | 0,15 / 0,25 (0,20 / 0,25 före 5/11) | Hur långt från mitten koden får ligga innan riktning sägs |
+| `min_interval_s` / `repeat_after_s` | 1,5 / 3,0 s (1,8 före 5/11) | Elias 5/11: "lite snabbare" |
 | `conflict_from_thin` | nej | Får en tunn läsning starta en konflikt? Köksprovet 4/11: en tunn felläsning gav "håll stilla" och 4 s extra väntan. Replay 5/11 (81 loggar): 0 fel vara med båda värdena, 44 mot 43 bekräftelser med `nej`. Två säkra läsningar av olika koder ger fortfarande konflikt |
 | `ready_after_s` | 15,0 s | "Redo för nästa vara" så länge efter att en bekräftad vara försvann. 0 stänger av. Startvärde, inte prövat |
 | `cue_interval_s` / `cue_quiet_s` | 1,0 s / 1,2 s | Pip: högst så här ofta, och inte så här snart efter tal. `cue_interval_s=0` stänger av pipet. Startvärden, inte prövade |
-| `no_code_after_s` / `no_code_repeat_s` / `no_code_max` | 8,0 s / 10,0 s / 2 | "Ingen kod": när, hur ofta och hur många gånger per sökning. 0 stänger av. Startvärden, inte prövade |
+| `no_code_after_s` / `no_code_repeat_s` / `no_code_max` | 4,0 s / 6,0 s / 3 (8 / 10 / 2 före 5/11) | "Ingen kod": när, hur ofta och hur många gånger per sökning. 0 stänger av. Startvärden, inte prövade |
 
 **Varför just de här reglerna (alla från mätningar):**
 - *Tunn = osäker, inte fel.* Nära pixelgränsen är även rätta läsningar 1 px höga (27/10). Därför blir tunn läsning "lite närmare" och inte tystnad.
