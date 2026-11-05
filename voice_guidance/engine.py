@@ -13,8 +13,9 @@ Reglerna, i prioritetsordning (se docs/ROSTVAGLEDNING.md):
   2. Bekräfta en vara först när den lästs säkert (inte tunn) flera gånger i rad och ingen konflikt råder.
   3. Annars, om koden syns men inte är säker: säg vart den ska (om den ligger i kanten, eftersom
      autofokus följer bildens mitt) eller "lite närmare".
-  4. Syns ingen kod alls på ett tag: "hittar ingen streckkod, vänd varan sakta", högst tre gånger per sökning.
-     Tystnad hade lämnat användaren utan att veta om systemet söker (Elias, 4/11).
+  4. Syns ingen kod alls på ett tag: tips i tur och ordning ("håll varan mitt framför dig", "vänd varan sakta",
+     "håll varan ungefär 30 cm bort"), först tätt och sedan glesare, utan slut tills en kod syns. Tystnad
+     lämnade användaren ensam i en minut (Elias, 4-5/11).
      Efter en lyckad scanning sägs i stället "redo för nästa vara" en gång, när varan varit borta en stund
      (användaren har då kanske ingen vara i handen, så "vänd varan" vore fel). Elias 5/11.
   5. Annars tystnad. Motorn pratar hellre för lite än för mycket.
@@ -35,6 +36,7 @@ from .model import (ActionKind, CodeRead, FrameObservation, GuidanceAction, Poin
 
 _NEVER = float("-inf")
 _CONFIRMATIONS = (ActionKind.CONFIRMED, ActionKind.UNKNOWN_PRODUCT)
+_NO_CODE_HINTS = (ActionKind.NO_CODE, ActionKind.NO_CODE_TURN, ActionKind.NO_CODE_DISTANCE)   # i den ordningen
 _AIMS = (ActionKind.CLOSER, ActionKind.CODE_LEFT, ActionKind.CODE_RIGHT, ActionKind.CODE_ABOVE,
          ActionKind.CODE_BELOW)
 
@@ -55,9 +57,10 @@ class GuidanceConfig:
     deadzone_y: float = 0.25
     min_interval_s: float = 1.5      # minst så här lång tid mellan två vägledningar (1,8 före 5/11: "lite snabbare")
     repeat_after_s: float = 3.0      # samma vägledning upprepas inte oftare än så här
-    no_code_after_s: float = 4.0     # ingen kod på så här lång tid: "hittar ingen streckkod" (8 s före 5/11: för långsamt)
-    no_code_repeat_s: float = 6.0    # ...och igen efter så här mycket till (10 s före 5/11)
-    no_code_max: int = 3             # högst så många gånger per sökning, sedan tyst tills en kod syns (0 = aldrig)
+    no_code_after_s: float = 4.0     # ingen kod på så här lång tid: första tipset (8 s före 5/11: för långsamt)
+    no_code_repeat_s: float = 6.0    # ...nästa tips så här tätt...
+    no_code_fast: int = 3            # ...de första så här många gångerna...
+    no_code_slow_repeat_s: float = 10.0   # ...sedan så här glest tills en kod syns (0 = tyst efter de täta; båda 0 = aldrig)
     ready_after_s: float = 15.0      # "redo för nästa vara" så här länge efter att en bekräftad vara försvann (0 = aldrig)
     cue_interval_s: float = 1.0      # pip när en osäker kod syns men talet hålls tillbaka, högst så här ofta (0 = av)
     cue_quiet_s: float = 1.2         # inget pip så här snart efter tal, så att pipet inte hamnar mitt i en fras
@@ -65,8 +68,8 @@ class GuidanceConfig:
     def __post_init__(self) -> None:
         if self.confirm_reads < 1:
             raise ValueError("confirm_reads måste vara minst 1")
-        if self.no_code_max < 0:
-            raise ValueError("no_code_max får inte vara negativ")
+        if self.no_code_fast < 0 or self.no_code_slow_repeat_s < 0:
+            raise ValueError("no_code_fast och no_code_slow_repeat_s får inte vara negativa")
         if self.cue_interval_s < 0 or self.cue_quiet_s < 0 or self.ready_after_s < 0:
             raise ValueError("cue_interval_s, cue_quiet_s och ready_after_s får inte vara negativa")
         for name in ("confirm_window_s", "lost_after_s", "conflict_window_s", "conflict_radius",
@@ -95,7 +98,8 @@ class GuidanceEngine:
         self._last_spoken = _NEVER
         self._last_by_kind: Dict[ActionKind, float] = {}
         self._search_since: Optional[float] = None   # när en kod senast syntes (eller när sökningen började)
-        self._no_code_said = 0                        # hur många gånger "ingen kod" sagts i den här sökningen
+        self._no_code_said = 0                        # hur många tips om "ingen kod" som sagts i den här sökningen
+        self._searching = True                        # False efter en lyckad scanning, tills en ny kod syns
         self._last_cue = _NEVER
         self._ready_pending = False                   # en vara har bekräftats: säg "redo" när den varit borta en stund
 
@@ -158,14 +162,29 @@ class GuidanceEngine:
         return self._aim(obs.reads)
 
     def _no_code_prompt(self, t: float) -> Optional[GuidanceAction]:
-        """Ingen kod syns. Säg det efter en stund, högst no_code_max gånger per sökning."""
+        """Ingen kod syns. Ge tips i tur och ordning, först tätt och sedan glesare. Efter en lyckad scanning: "redo"."""
         if self._ready_pending:
             ready = self._cfg.ready_after_s and t - self._search_since >= self._cfg.ready_after_s
             return GuidanceAction(ActionKind.READY) if ready else None
-        if self._no_code_said >= self._cfg.no_code_max:
+        if not self._searching:
             return None
-        due = self._cfg.no_code_after_s + self._no_code_said * self._cfg.no_code_repeat_s
-        return GuidanceAction(ActionKind.NO_CODE) if t - self._search_since >= due else None
+        due = self._no_code_due(self._no_code_said)
+        if due is None or t - self._search_since < due:
+            return None
+        return GuidanceAction(_NO_CODE_HINTS[self._no_code_said % len(_NO_CODE_HINTS)])
+
+    def _no_code_due(self, n: int) -> Optional[float]:
+        """Sekunder utan kod innan tips nummer n (0 = första). None = inga fler tips."""
+        cfg = self._cfg
+        if n < cfg.no_code_fast:
+            return cfg.no_code_after_s + n * cfg.no_code_repeat_s
+        if cfg.no_code_slow_repeat_s == 0:
+            return None
+        if cfg.no_code_fast:
+            first_slow = cfg.no_code_after_s + (cfg.no_code_fast - 1) * cfg.no_code_repeat_s + cfg.no_code_slow_repeat_s
+        else:
+            first_slow = cfg.no_code_after_s
+        return first_slow + (n - cfg.no_code_fast) * cfg.no_code_slow_repeat_s
 
     def _ready_to_confirm(self) -> Optional[str]:
         ready = [(len(v), v[-1], ean) for ean, v in self._votes.items()
@@ -197,14 +216,14 @@ class GuidanceEngine:
                 return None
         self._last_spoken = t
         self._last_by_kind[action.kind] = t
-        if action.kind is ActionKind.NO_CODE:
+        if action.kind in _NO_CODE_HINTS:
             self._no_code_said += 1
         if action.kind is ActionKind.READY:
             self._ready_pending = False                  # en gång, sedan tyst tills en ny kod syns
         if action.ean is not None:
             self._confirmed.add(action.ean)
             self._votes.pop(action.ean, None)
-            self._no_code_said = self._cfg.no_code_max   # sökningen lyckades: inget "vänd varan" när den läggs ner
+            self._searching = False                      # sökningen lyckades: inga tips när varan läggs ner
             self._ready_pending = True
         return action
 
@@ -213,6 +232,7 @@ class GuidanceEngine:
         """En ny sökning börjar vid start och när en kod syns som inte redan är bekräftad."""
         if self._search_since is None or any(r.ean not in self._confirmed for r in obs.reads):
             self._no_code_said = 0
+            self._searching = True
             self._ready_pending = False
         if self._search_since is None or obs.reads:
             self._search_since = obs.t

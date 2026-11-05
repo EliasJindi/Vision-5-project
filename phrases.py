@@ -40,7 +40,11 @@ GUIDANCE_PHRASES = {
     "closer": "Lite närmare.",
     "hold_still": "Håll stilla.",
     "unknown_product": "Okänd vara.",
-    "no_code": "Hittar ingen streckkod. Vänd varan sakta.",   # "Ingen kod." lät som "pinkod" (5/11)
+    # Ingen kod syns: tre tips i tur och ordning, sedan om igen (Elias 5/11: rösten ska blanda sig i mer).
+    # "Ingen kod." lät som "pinkod" med den snabba rösten, därav "streckkod".
+    "no_code": "Hittar ingen streckkod. Håll varan mitt framför dig.",
+    "no_code_turn": "Vänd varan sakta. Koden kan sitta på en annan sida.",
+    "no_code_distance": "Håll varan ungefär 30 centimeter bort.",   # läsningarna 4-5/11 kom på 18-45 cm
     "ready": "Redo för nästa vara.",
 }
 # Efter namnet, när varan lagts i korgen (voice_guidance/basket.py). Elias 5/11.

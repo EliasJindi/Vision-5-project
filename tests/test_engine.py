@@ -275,9 +275,18 @@ class NoCodeTest(unittest.TestCase):
             t += step
         return said
 
-    def test_says_no_code_after_four_seconds_then_every_six_three_times_in_all(self):
+    def test_hints_come_in_turn_first_every_six_then_every_ten_seconds_without_end(self):
+        N, TURN, DIST = ActionKind.NO_CODE, ActionKind.NO_CODE_TURN, ActionKind.NO_CODE_DISTANCE
         self.assertEqual(self.run_empty(0.0, 60.0),
-                         [(4.0, ActionKind.NO_CODE), (10.0, ActionKind.NO_CODE), (16.0, ActionKind.NO_CODE)])
+                         [(4.0, N), (10.0, TURN), (16.0, DIST), (26.0, N), (36.0, TURN), (46.0, DIST), (56.0, N)])
+
+    def test_slow_repeat_zero_stops_after_the_fast_hints(self):
+        self.engine = GuidanceEngine(CATALOG, GuidanceConfig(no_code_slow_repeat_s=0))
+        self.assertEqual([t for t, _ in self.run_empty(0.0, 60.0)], [4.0, 10.0, 16.0])
+
+    def test_without_fast_hints_the_slow_ones_start_at_the_first_delay(self):
+        self.engine = GuidanceEngine(CATALOG, GuidanceConfig(no_code_fast=0))
+        self.assertEqual([t for t, _ in self.run_empty(0.0, 30.0)], [4.0, 14.0, 24.0])
 
     def test_a_code_starts_a_new_search(self):
         self.run_empty(0.0, 30.0)                                   # tre gånger, sedan tyst
@@ -302,7 +311,8 @@ class NoCodeTest(unittest.TestCase):
         self.engine.update(frame(10.0, read(EAN_B, thin=True)))     # nästa vara dyker upp
         said = self.run_empty(10.5, 40.0)
         self.assertNotIn(ActionKind.READY, [k for _, k in said])
-        self.assertEqual(said, [(14.0, ActionKind.NO_CODE), (20.0, ActionKind.NO_CODE), (26.0, ActionKind.NO_CODE)])
+        self.assertEqual(said, [(14.0, ActionKind.NO_CODE), (20.0, ActionKind.NO_CODE_TURN),
+                                (26.0, ActionKind.NO_CODE_DISTANCE), (36.0, ActionKind.NO_CODE)])
 
     def test_ready_after_zero_never_says_ready(self):
         engine = GuidanceEngine(CATALOG, GuidanceConfig(ready_after_s=0))
@@ -314,10 +324,10 @@ class NoCodeTest(unittest.TestCase):
         self.engine.update(frame(0.0, read()))
         self.engine.update(frame(0.5, read()))                      # tomatpurén bekräftad
         self.engine.update(frame(20.0, read(EAN_B, thin=True)))     # en annan vara dyker upp, osäker
-        self.assertEqual(self.run_empty(20.5, 30.0), [(24.0, ActionKind.NO_CODE), (30.0, ActionKind.NO_CODE)])
+        self.assertEqual(self.run_empty(20.5, 30.0), [(24.0, ActionKind.NO_CODE), (30.0, ActionKind.NO_CODE_TURN)])
 
-    def test_zero_disables_the_prompt(self):
-        engine = GuidanceEngine(CATALOG, GuidanceConfig(no_code_max=0))
+    def test_zero_disables_the_hints(self):
+        engine = GuidanceEngine(CATALOG, GuidanceConfig(no_code_fast=0, no_code_slow_repeat_s=0))
         self.assertTrue(all(engine.update(frame(t)) is None for t in range(0, 60)))
 
 
@@ -327,7 +337,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_invalid_values_are_rejected(self):
         for bad in ({"confirm_reads": 0}, {"confirm_window_s": 0}, {"min_interval_s": -1}, {"conflict_escalate_s": 0},
-                    {"no_code_after_s": 0}, {"no_code_repeat_s": -1}, {"no_code_max": -1}, {"cue_interval_s": -1}, {"ready_after_s": -1}, {"cue_quiet_s": -0.1},
+                    {"no_code_after_s": 0}, {"no_code_repeat_s": -1}, {"no_code_fast": -1}, {"no_code_slow_repeat_s": -1}, {"cue_interval_s": -1}, {"ready_after_s": -1}, {"cue_quiet_s": -0.1},
                     {"deadzone_x": 0}, {"deadzone_y": 0.6}, {"conflict_radius": 0}):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):

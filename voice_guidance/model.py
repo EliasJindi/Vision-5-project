@@ -31,7 +31,9 @@ class ActionKind(Enum):
     CODE_ABOVE = "code_above"
     CODE_BELOW = "code_below"
     HOLD_STILL = "hold_still"              # två olika koder från samma ställe: osäkert
-    NO_CODE = "no_code"                    # ingen kod har synts på ett tag: koden sitter troligen på en annan sida
+    NO_CODE = "no_code"                    # ingen kod på ett tag: håll varan i mitten (första tipset)
+    NO_CODE_TURN = "no_code_turn"          # ...vänd varan, koden kan sitta på en annan sida (andra tipset)
+    NO_CODE_DISTANCE = "no_code_distance"  # ...håll varan ungefär 30 cm bort (tredje tipset, sedan om igen)
     READY = "ready"                        # en stund efter en lyckad scanning: redo för nästa vara (Elias 5/11)
     CODE_SEEN = "code_seen"                # ett kort pip, inget tal: en kod syns men är inte läsbar än
 
