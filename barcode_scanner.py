@@ -94,6 +94,10 @@
 #     "Tomatpure. 140 gram. Hylla 3." För lång info stoppar starten med en förklaring. (2026-11-04)
 # 33. Med --vagledning läggs bekräftade varor i en korg: "Tomatpure. 500 gram. Tillagd.", och
 #     "Finns redan i korgen." om samma vara skannas igen. Korgen skrivs ut när skannern avslutas. (2026-11-05)
+# 34. --fokusruta [ANDEL]: autofokus ställer bara skarpt på en ruta mitt i bilden (standard 40 % av bredd
+#     och höjd), så att bakgrunden inte drar iväg fokus (B2 i förslaget 20/10). Utan flaggan som förut.
+#     Rutan räknas i ISP-bildens pixlar. Det är inte verifierat på kameran att DepthAI tolkar dem så: se
+#     linspositionen i --diag. (2026-11-05)
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
@@ -216,7 +220,18 @@ def user_position(cand, d):
     return None
 
 
-def build_pipeline(uhd=False, focus=None):
+FOCUS_REGION_DEFAULT = 0.4   # --fokusruta utan värde: rutan är 40 % av bildens bredd och höjd
+
+
+def focus_region(width, height, share):
+    """Ruta mitt i bilden för autofokus: (x, y, bredd, höjd) i pixlar. share = andel av bredd och höjd."""
+    if not 0 < share <= 1:
+        raise ValueError(f"andelen måste ligga mellan 0 och 1, inte {share}")
+    w, h = max(1, round(width * share)), max(1, round(height * share))
+    return (width - w) // 2, (height - h) // 2, w, h
+
+
+def build_pipeline(uhd=False, focus=None, focus_share=None):
     pipeline = dai.Pipeline()
     fps = UHD_FPS if uhd else CAMERA_FPS
 
@@ -232,6 +247,9 @@ def build_pipeline(uhd=False, focus=None):
     cam.setFps(fps)
     if focus is not None:
         cam.initialControl.setManualFocus(focus)   # låst lins, autofokus av
+    elif focus_share is not None:
+        # Autofokus bara på mitten (ändring 34). ISP-storleken = bilden kameran räknar fram före beskärning.
+        cam.initialControl.setAutoFocusRegion(*focus_region(cam.getIspWidth(), cam.getIspHeight(), focus_share))
 
     mono_l = pipeline.create(dai.node.MonoCamera)
     mono_r = pipeline.create(dai.node.MonoCamera)
@@ -517,6 +535,8 @@ def main():
     ap.add_argument("--4k", dest="uhd", action="store_true", help="läs i 3840x2160 (längre läsavstånd)")
     ap.add_argument("--fokus", type=int, metavar="N",
                     help="lås linsen på position N (0-255) i stället för autofokus")
+    ap.add_argument("--fokusruta", type=float, nargs="?", const=FOCUS_REGION_DEFAULT, metavar="ANDEL",
+                    help=f"autofokus bara på en ruta mitt i bilden (andel av bredd och höjd, standard {FOCUS_REGION_DEFAULT})")
     ap.add_argument("--facit", metavar="EAN",
                     help="rätt streckkod i testet: loggar varje läsning som rätt/fel och märker felläsningar")
     ap.add_argument("--filter", action="store_true",
@@ -530,6 +550,10 @@ def main():
     args = ap.parse_args()
     if args.fokus is not None and not 0 <= args.fokus <= 255:
         sys.exit(f"❌ --fokus {args.fokus} är utanför 0-255")
+    if args.fokusruta is not None and not 0.1 <= args.fokusruta <= 1.0:
+        sys.exit(f"❌ --fokusruta {args.fokusruta} ska ligga mellan 0,1 och 1,0")
+    if args.fokusruta is not None and args.fokus is not None:
+        sys.exit("❌ --fokus låser linsen och --fokusruta styr autofokus: välj en av dem")
     if args.lank is not None and not 0 <= args.lank <= 65535:
         sys.exit(f"❌ --lank {args.lank} är ingen giltig port (0-65535)")
     facit = None
@@ -560,10 +584,15 @@ def main():
                                  AimConvention.HEAD if args.sikte == "huvud" else AimConvention.HAND, args.lank)
     except OSError as e:   # t.ex. porten är upptagen
         sys.exit(f"❌ Kunde inte öppna länken på port {args.lank}: {e}")
-    with dai.Device(build_pipeline(uhd=args.uhd, focus=args.fokus)) as device, open(log_path, "a", encoding="utf-8") as log:
+    with dai.Device(build_pipeline(uhd=args.uhd, focus=args.fokus, focus_share=args.fokusruta)) as device, open(log_path, "a", encoding="utf-8") as log:
         usb = device.getUsbSpeed()
         print(f"Kamera: {'4K 3840x2160 @ ' + str(UHD_FPS) if args.uhd else '1080p @ ' + str(CAMERA_FPS)} fps, USB {usb.name}")
-        print(f"Fokus: {'manuell, linsposition ' + str(args.fokus) if args.fokus is not None else 'autofokus'}")
+        if args.fokus is not None:
+            print(f"Fokus: manuell, linsposition {args.fokus}")
+        elif args.fokusruta is not None:
+            print(f"Fokus: autofokus, bara rutan i mitten ({args.fokusruta * 100:.0f} % av bredd och höjd)")
+        else:
+            print("Fokus: autofokus")
         print(f"Filter: {'PÅ (avvisar tunna remsor, ingen position vid orimligt djup)' if args.filter else 'AV (loggas och märks bara)'}")
         if args.uhd and usb not in (dai.UsbSpeed.SUPER, dai.UsbSpeed.SUPER_PLUS):
             print("⚠️  4K kräver USB3 (blå port). Med USB2 kan bilden hacka eller utebli.")
