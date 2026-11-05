@@ -40,7 +40,7 @@ Motorn får en bildruta i taget och svarar med **högst ett besked**, eller tyst
 
 | # | Läge | Besked |
 |---|---|---|
-| 1 | Två **olika** koder lästes från ungefär samma ställe inom 3 s | **"Håll stilla."** Inget bekräftas under konflikten och 3 s efter. Varar den över 5 s sägs i stället **"Lite närmare."** (närmare tog bort felläsningarna 29/10, och "håll stilla" upprepat i 35 s fastnar användaren i). Är en vara redan bekräftad tiger motorn (en avvikande läsning är då troligen en felläsning) |
+| 1 | Två **olika** koder lästes **säkert** (inte tunna) från ungefär samma ställe inom 3 s | **"Håll stilla."** Inget bekräftas under konflikten och 3 s efter. Varar den över 5 s sägs i stället **"Lite närmare."** (närmare tog bort felläsningarna 29/10, och "håll stilla" upprepat i 35 s fastnar användaren i). Är en vara redan bekräftad tiger motorn (en avvikande läsning är då troligen en felläsning) |
 | 2 | Samma vara lästes **säkert** (inte tunn) minst 2 gånger inom 2 s, ingen konflikt | **Varans namn** ("Tomatpure."), följt av kartans `info` om den finns ("Tomatpure. 140 gram. Hylla 3."). Finns varan inte i kartan: **"Okänd vara."** Sägs en gång tills varan varit borta i 5 s |
 | 3 | Koden syns men är osäker (tunn eller ogiltig kontrollsiffra), ingen vara bekräftad | Ligger koden i bildens kant: **riktning** (autofokus följer bildens mitt). Annars **"Lite närmare."** |
 | 4 | **Ingen kod alls** på 8 s | **"Ingen kod. Vänd varan långsamt."** En gång till efter 10 s, sedan tyst tills en kod syns. Inte efter en lyckad läsning (då är sökningen klar). Tystnad hade lämnat användaren utan att veta om systemet söker (Elias, 4/11) |
@@ -58,7 +58,7 @@ Takt: minst 1,8 s mellan beskeden, och samma besked upprepas inte oftare än var
 | `conflict_escalate_s` | 5,0 s | Efter så lång konflikt byts "håll stilla" mot "lite närmare" |
 | `deadzone_x` / `deadzone_y` | 0,20 / 0,25 | Hur långt från mitten koden får ligga innan riktning sägs |
 | `min_interval_s` / `repeat_after_s` | 1,8 / 3,0 s | Pratar hellre för lite än för mycket |
-| `conflict_from_thin` | ja | Får en tunn läsning starta en konflikt? Köksprovet 4/11: en tunn felläsning gav "håll stilla" och 4 s extra väntan. Prövas med replay innan det ändras |
+| `conflict_from_thin` | nej | Får en tunn läsning starta en konflikt? Köksprovet 4/11: en tunn felläsning gav "håll stilla" och 4 s extra väntan. Replay 5/11 (81 loggar): 0 fel vara med båda värdena, 44 mot 43 bekräftelser med `nej`. Två säkra läsningar av olika koder ger fortfarande konflikt |
 | `cue_interval_s` / `cue_quiet_s` | 1,0 s / 1,2 s | Pip: högst så här ofta, och inte så här snart efter tal. `cue_interval_s=0` stänger av pipet. Startvärden, inte prövade |
 | `no_code_after_s` / `no_code_repeat_s` / `no_code_max` | 8,0 s / 10,0 s / 2 | "Ingen kod": när, hur ofta och hur många gånger per sökning. 0 stänger av. Startvärden, inte prövade |
 

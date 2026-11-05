@@ -238,10 +238,10 @@ class ConflictTest(unittest.TestCase):
     def test_thin_reads_can_be_kept_out_of_conflicts(self):
         # Köksprovet 4/11: en tunn felläsning bredvid tomatpurén gav "håll stilla" och 4 s extra väntan.
         thin_wrong = lambda engine: engine.update(frame(0.5, read(EAN_B, x=0.52, thin=True)))
-        default = GuidanceEngine(CATALOG)
-        default.update(frame(0.0, read(EAN_A)))
-        self.assertEqual(thin_wrong(default).kind, ActionKind.HOLD_STILL)
-        relaxed = GuidanceEngine(CATALOG, GuidanceConfig(conflict_from_thin=False))
+        strict = GuidanceEngine(CATALOG, GuidanceConfig(conflict_from_thin=True))
+        strict.update(frame(0.0, read(EAN_A)))
+        self.assertEqual(thin_wrong(strict).kind, ActionKind.HOLD_STILL)
+        relaxed = GuidanceEngine(CATALOG)   # standard sedan replay 5/11
         relaxed.update(frame(0.0, read(EAN_A)))
         thin_wrong(relaxed)
         self.assertEqual(relaxed.update(frame(1.0, read(EAN_A))).kind, ActionKind.CONFIRMED)
