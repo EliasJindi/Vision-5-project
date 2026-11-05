@@ -314,6 +314,21 @@ class NoCodeTest(unittest.TestCase):
         self.assertEqual(said, [(14.0, ActionKind.NO_CODE), (20.0, ActionKind.NO_CODE_TURN),
                                 (26.0, ActionKind.NO_CODE_DISTANCE), (36.0, ActionKind.NO_CODE)])
 
+    def test_the_same_product_glimpsed_after_it_was_forgotten_does_not_restart_the_hints(self):
+        # Provet 5/11: tomatpurén bekräftad, borta i över 5 s, en enda läsning till, sedan "hittar ingen streckkod".
+        self.engine.update(frame(0.0, read()))
+        self.engine.update(frame(0.5, read()))                      # bekräftad
+        self.assertIsNone(self.engine.update(frame(7.0, read())))   # glömd (>5 s), skymtar förbi en gång
+        self.assertEqual(self.run_empty(7.5, 40.0), [(22.0, ActionKind.READY)])   # 15 s efter, inga tips
+
+    def test_the_previous_product_counts_as_a_new_code_once_a_new_search_has_begun(self):
+        self.engine.update(frame(0.0, read()))
+        self.engine.update(frame(0.5, read()))                      # tomatpurén bekräftad
+        self.engine.update(frame(10.0, read(EAN_B, thin=True)))     # ny sökning: en annan vara
+        self.run_empty(10.5, 20.5)                                  # tips 1 och 2
+        self.engine.update(frame(21.0, read(EAN_A, thin=True)))     # tomatpurén igen, mitt i sökningen
+        self.assertEqual(self.run_empty(21.5, 26.0)[0], (25.0, ActionKind.NO_CODE))   # tipsen börjar om
+
     def test_ready_after_zero_never_says_ready(self):
         engine = GuidanceEngine(CATALOG, GuidanceConfig(ready_after_s=0))
         engine.update(frame(0.0, read()))
