@@ -276,9 +276,9 @@ class NoCodeTest(unittest.TestCase):
         return said
 
     def test_hints_come_in_turn_first_every_six_then_every_ten_seconds_without_end(self):
-        N, TURN, DIST = ActionKind.NO_CODE, ActionKind.NO_CODE_TURN, ActionKind.NO_CODE_DISTANCE
+        N, TURN, FLIP = ActionKind.NO_CODE, ActionKind.NO_CODE_TURN, ActionKind.NO_CODE_FLIP
         self.assertEqual(self.run_empty(0.0, 60.0),
-                         [(4.0, N), (10.0, TURN), (16.0, DIST), (26.0, N), (36.0, TURN), (46.0, DIST), (56.0, N)])
+                         [(4.0, N), (10.0, TURN), (16.0, FLIP), (26.0, N), (36.0, TURN), (46.0, FLIP), (56.0, N)])
 
     def test_slow_repeat_zero_stops_after_the_fast_hints(self):
         self.engine = GuidanceEngine(CATALOG, GuidanceConfig(no_code_slow_repeat_s=0))
@@ -312,7 +312,7 @@ class NoCodeTest(unittest.TestCase):
         said = self.run_empty(10.5, 40.0)
         self.assertNotIn(ActionKind.READY, [k for _, k in said])
         self.assertEqual(said, [(14.0, ActionKind.NO_CODE), (20.0, ActionKind.NO_CODE_TURN),
-                                (26.0, ActionKind.NO_CODE_DISTANCE), (36.0, ActionKind.NO_CODE)])
+                                (26.0, ActionKind.NO_CODE_FLIP), (36.0, ActionKind.NO_CODE)])
 
     def test_the_same_product_glimpsed_after_it_was_forgotten_does_not_restart_the_hints(self):
         # Provet 5/11: tomatpurén bekräftad, borta i över 5 s, en enda läsning till, sedan "hittar ingen streckkod".
