@@ -100,6 +100,7 @@ class GuidanceEngine:
         self._search_since: Optional[float] = None   # när en kod senast syntes (eller när sökningen började)
         self._no_code_said = 0                        # hur många tips om "ingen kod" som sagts i den här sökningen
         self._searching = True                        # False efter en lyckad scanning, tills en ny kod syns
+        self._last_success: Optional[str] = None      # varan som senast bekräftades
         self._last_cue = _NEVER
         self._ready_pending = False                   # en vara har bekräftats: säg "redo" när den varit borta en stund
 
@@ -224,13 +225,22 @@ class GuidanceEngine:
             self._confirmed.add(action.ean)
             self._votes.pop(action.ean, None)
             self._searching = False                      # sökningen lyckades: inga tips när varan läggs ner
+            self._last_success = action.ean
             self._ready_pending = True
         return action
 
     # ---------- minne ----------
     def _track_search(self, obs: FrameObservation) -> None:
-        """En ny sökning börjar vid start och när en kod syns som inte redan är bekräftad."""
-        if self._search_since is None or any(r.ean not in self._confirmed for r in obs.reads):
+        """
+        En ny sökning börjar vid start och när en kod syns som inte redan är bekräftad. Efter en lyckad
+        scanning räknas inte samma vara som en ny sökning, även om den hunnit glömmas (borta i mer än
+        lost_after_s): annars börjar tipsen om när varan skymtar förbi (provet 5/11, 16:05:38).
+        """
+        def starts_search(read: CodeRead) -> bool:
+            if read.ean in self._confirmed:
+                return False
+            return self._searching or read.ean != self._last_success
+        if self._search_since is None or any(starts_search(r) for r in obs.reads):
             self._no_code_said = 0
             self._searching = True
             self._ready_pending = False
