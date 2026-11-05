@@ -71,9 +71,9 @@ class GuidanceSessionTest(unittest.TestCase):
     def test_frames_without_reads_are_silent_but_advance_time(self):
         session, _, speaker = build()
         session.on_frame(1.0, [record(1.0, filter=[])])
-        self.assertIsNone(session.on_frame(5.0, []))
-        session.on_frame(6.0, [record(6.0, filter=[])])
-        session.on_frame(6.5, [record(6.5, filter=[])])
+        self.assertIsNone(session.on_frame(4.5, []))   # under 4 s utan kod: ännu inget "hittar ingen streckkod"
+        session.on_frame(7.0, [record(7.0, filter=[])])    # mer än 2 s efter första läsningen: den räknas inte
+        session.on_frame(7.5, [record(7.5, filter=[])])
         self.assertEqual(speaker.texts, ["Tomatpure. Tillagd."])   # bara en bekräftelse: första läsningen var ensam
 
     def test_a_broken_record_is_skipped_with_one_warning(self):
