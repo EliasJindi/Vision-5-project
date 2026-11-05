@@ -15,6 +15,8 @@ Reglerna, i prioritetsordning (se docs/ROSTVAGLEDNING.md):
      autofokus följer bildens mitt) eller "lite närmare".
   4. Syns ingen kod alls på ett tag: "ingen kod, vänd varan långsamt", högst två gånger per sökning.
      Tystnad hade lämnat användaren utan att veta om systemet söker (Elias, 4/11).
+     Efter en lyckad scanning sägs i stället "redo för nästa vara" en gång, när varan varit borta en stund
+     (användaren har då kanske ingen vara i handen, så "vänd varan" vore fel). Elias 5/11.
   5. Annars tystnad. Motorn pratar hellre för lite än för mycket.
 
 Pip: när regel 3 hade velat säga något men takten håller tillbaka talet hörs ett kort pip i stället
@@ -56,6 +58,7 @@ class GuidanceConfig:
     no_code_after_s: float = 8.0     # ingen kod på så här lång tid: "ingen kod, vänd varan" (Elias, 4/11)
     no_code_repeat_s: float = 10.0   # ...och igen efter så här mycket till
     no_code_max: int = 2             # högst så många gånger per sökning, sedan tyst tills en kod syns (0 = aldrig)
+    ready_after_s: float = 15.0      # "redo för nästa vara" så här länge efter att en bekräftad vara försvann (0 = aldrig)
     cue_interval_s: float = 1.0      # pip när en osäker kod syns men talet hålls tillbaka, högst så här ofta (0 = av)
     cue_quiet_s: float = 1.2         # inget pip så här snart efter tal, så att pipet inte hamnar mitt i en fras
 
@@ -64,8 +67,8 @@ class GuidanceConfig:
             raise ValueError("confirm_reads måste vara minst 1")
         if self.no_code_max < 0:
             raise ValueError("no_code_max får inte vara negativ")
-        if self.cue_interval_s < 0 or self.cue_quiet_s < 0:
-            raise ValueError("cue_interval_s och cue_quiet_s får inte vara negativa")
+        if self.cue_interval_s < 0 or self.cue_quiet_s < 0 or self.ready_after_s < 0:
+            raise ValueError("cue_interval_s, cue_quiet_s och ready_after_s får inte vara negativa")
         for name in ("confirm_window_s", "lost_after_s", "conflict_window_s", "conflict_radius",
                      "conflict_hold_s", "conflict_escalate_s", "min_interval_s", "repeat_after_s",
                      "no_code_after_s", "no_code_repeat_s"):
@@ -94,6 +97,7 @@ class GuidanceEngine:
         self._search_since: Optional[float] = None   # när en kod senast syntes (eller när sökningen började)
         self._no_code_said = 0                        # hur många gånger "ingen kod" sagts i den här sökningen
         self._last_cue = _NEVER
+        self._ready_pending = False                   # en vara har bekräftats: säg "redo" när den varit borta en stund
 
     @property
     def config(self) -> GuidanceConfig:
@@ -155,6 +159,9 @@ class GuidanceEngine:
 
     def _no_code_prompt(self, t: float) -> Optional[GuidanceAction]:
         """Ingen kod syns. Säg det efter en stund, högst no_code_max gånger per sökning."""
+        if self._ready_pending:
+            ready = self._cfg.ready_after_s and t - self._search_since >= self._cfg.ready_after_s
+            return GuidanceAction(ActionKind.READY) if ready else None
         if self._no_code_said >= self._cfg.no_code_max:
             return None
         due = self._cfg.no_code_after_s + self._no_code_said * self._cfg.no_code_repeat_s
@@ -192,10 +199,13 @@ class GuidanceEngine:
         self._last_by_kind[action.kind] = t
         if action.kind is ActionKind.NO_CODE:
             self._no_code_said += 1
+        if action.kind is ActionKind.READY:
+            self._ready_pending = False                  # en gång, sedan tyst tills en ny kod syns
         if action.ean is not None:
             self._confirmed.add(action.ean)
             self._votes.pop(action.ean, None)
-            self._no_code_said = self._cfg.no_code_max   # sökningen lyckades: tjata inte när varan läggs ner
+            self._no_code_said = self._cfg.no_code_max   # sökningen lyckades: inget "vänd varan" när den läggs ner
+            self._ready_pending = True
         return action
 
     # ---------- minne ----------
@@ -203,6 +213,7 @@ class GuidanceEngine:
         """En ny sökning börjar vid start och när en kod syns som inte redan är bekräftad."""
         if self._search_since is None or any(r.ean not in self._confirmed for r in obs.reads):
             self._no_code_said = 0
+            self._ready_pending = False
         if self._search_since is None or obs.reads:
             self._search_since = obs.t
 

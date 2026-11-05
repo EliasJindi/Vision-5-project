@@ -11,10 +11,11 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Mapping, Optional, Sequence
 
+from .basket import Basket
 from .catalog import DictProductCatalog
 from .engine import GuidanceEngine
 from .link import EventPublisher, NullPublisher, SayCommand, TcpJsonLink
-from .model import AimConvention, CodeRead, FrameObservation, GuidanceAction
+from .model import ActionKind, AimConvention, CodeRead, FrameObservation, GuidanceAction
 from .voice import AudioManagerSpeaker, ConsoleSpeaker, GuidanceVoice, Speaker
 
 
@@ -26,11 +27,16 @@ class GuidanceMode(Enum):
 
 class GuidanceSession:
     def __init__(self, engine: Optional[GuidanceEngine], voice: Optional[GuidanceVoice],
-                 link: EventPublisher) -> None:
+                 link: EventPublisher, basket: Optional[Basket] = None) -> None:
         if (engine is None) != (voice is None):
             raise ValueError("motor och röst hör ihop: båda eller ingen")
         self._engine, self._voice, self._link = engine, voice, link
+        self._basket = basket if basket is not None else Basket()
         self._malformed = 0
+
+    @property
+    def basket(self) -> Basket:
+        return self._basket
 
     def on_frame(self, t: float, records: Sequence[Mapping[str, Any]]) -> Optional[GuidanceAction]:
         """
@@ -43,9 +49,12 @@ class GuidanceSession:
             return None
         action = self._engine.update(FrameObservation(t, self._reads(records)))
         if action is not None:
-            text = self._voice.announce(action)
+            # Bara kända varor läggs i korgen. "Okänd vara" kan vara en felläsning.
+            in_basket = self._basket.add(action.ean, action.name) if action.kind is ActionKind.CONFIRMED else None
+            text = self._voice.announce(action, in_basket)
             self._link.publish({"type": "guidance", "t": round(t, 3), "action": action.kind.value,
-                                "ean": action.ean, "name": action.name, "details": list(action.details), "text": text})
+                                "ean": action.ean, "name": action.name, "details": list(action.details),
+                                "basket": in_basket.value if in_basket else None, "text": text})
         return action
 
     def close(self) -> None:

@@ -18,6 +18,7 @@ from typing import Any, Optional, Protocol, Sequence
 
 from phrases import guidance_phrases, guidance_text
 
+from .basket import BasketResult
 from .model import ActionKind, AimConvention, GuidanceAction
 
 GUIDANCE_PRIORITY = 3   # audio_manager: 1 = akutlarm, 2 = Gemini, 3 = övrigt. Vägledning får aldrig gå före säkerhet.
@@ -99,10 +100,12 @@ class GuidanceVoice:
     def convention(self) -> AimConvention:
         return self._convention
 
-    def announce(self, action: GuidanceAction) -> str:
+    def announce(self, action: GuidanceAction, basket: Optional[BasketResult] = None) -> str:
+        """basket: vad som hände med varan i korgen. Läses efter namnet, bara vid CONFIRMED."""
         if action.kind is ActionKind.CODE_SEEN:
             self._speaker.cue()
             return CUE_TEXT
-        text = guidance_text(action.kind.value, self._convention.value, action.name, action.details)
+        text = guidance_text(action.kind.value, self._convention.value, action.name, action.details,
+                             basket.value if basket else None)
         self._speaker.say(text, key=action.kind.value)
         return text
