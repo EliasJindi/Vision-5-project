@@ -66,7 +66,7 @@ class GuidanceSessionTest(unittest.TestCase):
         session, _, speaker = build()
         session.on_frame(1.0, [record(1.0, corners=THIN_CORNERS, filter=["tunn"])])
         self.assertEqual(len(speaker.texts), 1)
-        self.assertTrue(speaker.texts[0].startswith("Lite"))
+        self.assertIn("närmare", speaker.texts[0])
 
     def test_frames_without_reads_are_silent_but_advance_time(self):
         session, _, speaker = build()
@@ -112,7 +112,7 @@ class CreateSessionTest(unittest.TestCase):
         session = create_session(PRODUCTS, GuidanceMode.TEXT)
         with contextlib.redirect_stdout(out):
             session.on_frame(1.0, [record(1.0, corners=THIN_CORNERS, filter=["tunn"])])
-        self.assertIn("Lite", out.getvalue())
+        self.assertIn("Sakta närmare.", out.getvalue())
 
     def test_link_without_guidance_still_plays_say_commands(self):
         speaker = FakeSpeaker()

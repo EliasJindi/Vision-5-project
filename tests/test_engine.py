@@ -180,6 +180,38 @@ class DetailsTest(unittest.TestCase):
             GuidanceAction(ActionKind.CLOSER, details=("140 gram",))
 
 
+class SteadyTest(unittest.TestCase):
+    """Elias 6/11: när koden väl är hittad måste man stå still. Säg det om den andra säkra läsningen dröjer."""
+
+    def test_hold_still_when_the_second_reliable_read_is_late(self):
+        engine = GuidanceEngine(CATALOG)
+        self.assertIsNone(engine.update(frame(0.0, read())))           # första säkra läsningen
+        self.assertIsNone(engine.update(frame(0.5)))                   # den andra har inte kommit, men det är tidigt
+        self.assertEqual(engine.update(frame(1.0)).kind, ActionKind.STEADY)   # koden tappad: stå still
+        self.assertEqual(engine.update(frame(1.5, read())).kind, ActionKind.CONFIRMED)
+
+    def test_no_hold_still_when_the_second_read_comes_in_time(self):
+        engine = GuidanceEngine(CATALOG)
+        engine.update(frame(0.0, read()))
+        self.assertEqual(engine.update(frame(0.5, read())).kind, ActionKind.CONFIRMED)
+
+    def test_hold_still_is_said_once_and_stops_when_the_vote_expires(self):
+        engine = GuidanceEngine(CATALOG)
+        engine.update(frame(0.0, read()))
+        said = [engine.update(frame(t)) for t in (1.0, 1.5, 2.0, 2.5, 3.0)]
+        self.assertEqual(kinds(said), [ActionKind.STEADY, None, None, None, None])
+
+    def test_steady_after_zero_turns_it_off(self):
+        engine = GuidanceEngine(CATALOG, GuidanceConfig(steady_after_s=0))
+        said = [engine.update(frame(0.0, read()))] + [engine.update(frame(t)) for t in (0.5, 1.0, 1.5)]
+        self.assertNotIn(ActionKind.STEADY, kinds(said))
+
+    def test_thin_reads_alone_never_ask_to_hold_still(self):
+        engine = GuidanceEngine(EmptyProductCatalog())
+        said = [engine.update(frame(t, read(thin=True))) for t in (0.0, 1.0, 2.0, 3.0)]
+        self.assertNotIn(ActionKind.STEADY, kinds(said))
+
+
 class ConflictTest(unittest.TestCase):
     def setUp(self):
         self.engine = GuidanceEngine(CATALOG)
@@ -352,7 +384,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_invalid_values_are_rejected(self):
         for bad in ({"confirm_reads": 0}, {"confirm_window_s": 0}, {"min_interval_s": -1}, {"conflict_escalate_s": 0},
-                    {"no_code_after_s": 0}, {"no_code_repeat_s": -1}, {"no_code_fast": -1}, {"no_code_slow_repeat_s": -1}, {"cue_interval_s": -1}, {"ready_after_s": -1}, {"cue_quiet_s": -0.1},
+                    {"no_code_after_s": 0}, {"no_code_repeat_s": -1}, {"no_code_fast": -1}, {"no_code_slow_repeat_s": -1}, {"cue_interval_s": -1}, {"ready_after_s": -1}, {"steady_after_s": -0.5}, {"cue_quiet_s": -0.1},
                     {"deadzone_x": 0}, {"deadzone_y": 0.6}, {"conflict_radius": 0}):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):

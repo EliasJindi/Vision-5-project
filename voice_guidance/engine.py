@@ -11,6 +11,7 @@ Reglerna, i prioritetsordning (se docs/ROSTVAGLEDNING.md):
   1. Konflikt: två olika säkra koder från samma ställe inom några sekunder betyder att minst en är fel.
      Säg "håll stilla" och bekräfta ingenting under en stund. Varar konflikten länge: "lite närmare".
   2. Bekräfta en vara först när den lästs säkert (inte tunn) flera gånger i rad och ingen konflikt råder.
+     Har bara en säker läsning kommit och den andra dröjer: "håll stilla" (Elias 6/11: rör man sig då tappas koden).
   3. Annars, om koden syns men inte är säker: säg vart den ska (om den ligger i kanten, eftersom
      autofokus följer bildens mitt) eller "lite närmare".
   4. Syns ingen kod alls på ett tag: korta tips i tur och ordning ("håll varan framför dig, en halv armlängd
@@ -62,6 +63,7 @@ class GuidanceConfig:
     no_code_fast: int = 3            # ...de första så här många gångerna...
     no_code_slow_repeat_s: float = 10.0   # ...sedan så här glest tills en kod syns (0 = tyst efter de täta; båda 0 = aldrig)
     ready_after_s: float = 15.0      # "redo för nästa vara" så här länge efter att en bekräftad vara försvann (0 = aldrig)
+    steady_after_s: float = 0.9      # "håll stilla" om den andra säkra läsningen dröjer så här länge (0 = aldrig)
     cue_interval_s: float = 1.0      # pip när en osäker kod syns men talet hålls tillbaka, högst så här ofta (0 = av)
     cue_quiet_s: float = 1.2         # inget pip så här snart efter tal, så att pipet inte hamnar mitt i en fras
 
@@ -70,8 +72,8 @@ class GuidanceConfig:
             raise ValueError("confirm_reads måste vara minst 1")
         if self.no_code_fast < 0 or self.no_code_slow_repeat_s < 0:
             raise ValueError("no_code_fast och no_code_slow_repeat_s får inte vara negativa")
-        if self.cue_interval_s < 0 or self.cue_quiet_s < 0 or self.ready_after_s < 0:
-            raise ValueError("cue_interval_s, cue_quiet_s och ready_after_s får inte vara negativa")
+        if min(self.cue_interval_s, self.cue_quiet_s, self.ready_after_s, self.steady_after_s) < 0:
+            raise ValueError("cue_interval_s, cue_quiet_s, ready_after_s och steady_after_s får inte vara negativa")
         for name in ("confirm_window_s", "lost_after_s", "conflict_window_s", "conflict_radius",
                      "conflict_hold_s", "conflict_escalate_s", "min_interval_s", "repeat_after_s",
                      "no_code_after_s", "no_code_repeat_s"):
@@ -156,11 +158,25 @@ class GuidanceEngine:
             return (GuidanceAction(ActionKind.CONFIRMED, ean=ean, name=name, details=self._catalog.details_of(ean))
                     if name else GuidanceAction(ActionKind.UNKNOWN_PRODUCT, ean=ean))
 
+        steady = self._steady_prompt(obs.t)
+        if steady is not None:
+            return steady
         if not obs.reads:
             return self._no_code_prompt(obs.t)
         if self._confirmed or any(r.reliable for r in obs.reads):
             return None   # redan bekräftad, eller en säker läsning som väntar på sin andra röst
         return self._aim(obs.reads)
+
+    def _steady_prompt(self, t: float) -> Optional[GuidanceAction]:
+        """En säker läsning av en ny vara väntar på sin andra och den dröjer: be användaren stå still.
+        Gäller även bildrutor utan kod, eftersom koden ofta tappas just när användaren rör sig."""
+        if self._cfg.steady_after_s == 0:
+            return None
+        waiting = [votes[0] for ean, votes in self._votes.items()
+                   if ean not in self._confirmed and not self._just_scanned(ean)]
+        if waiting and t - min(waiting) >= self._cfg.steady_after_s:
+            return GuidanceAction(ActionKind.STEADY)
+        return None
 
     def _no_code_prompt(self, t: float) -> Optional[GuidanceAction]:
         """Ingen kod syns. Ge tips i tur och ordning, först tätt och sedan glesare. Efter en lyckad scanning: "redo"."""
@@ -237,15 +253,17 @@ class GuidanceEngine:
         lost_after_s): annars börjar tipsen om när varan skymtar förbi (provet 5/11, 16:05:38).
         """
         def starts_search(read: CodeRead) -> bool:
-            if read.ean in self._confirmed:
-                return False
-            return self._searching or read.ean != self._last_success
+            return read.ean not in self._confirmed and not self._just_scanned(read.ean)
         if self._search_since is None or any(starts_search(r) for r in obs.reads):
             self._no_code_said = 0
             self._searching = True
             self._ready_pending = False
         if self._search_since is None or obs.reads:
             self._search_since = obs.t
+
+    def _just_scanned(self, ean: Optional[str]) -> bool:
+        """Varan som precis skannades, innan en ny sökning börjat. Den ger varken tips eller "håll stilla"."""
+        return not self._searching and ean == self._last_success
 
     def _record(self, obs: FrameObservation) -> None:
         for read in obs.reads:
