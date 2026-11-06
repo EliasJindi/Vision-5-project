@@ -42,7 +42,8 @@ Motorn får en bildruta i taget och svarar med **högst ett besked**, eller tyst
 |---|---|---|
 | 1 | Två **olika** koder lästes **säkert** (inte tunna) från ungefär samma ställe inom 3 s | **"Håll stilla."** Inget bekräftas under konflikten och 3 s efter. Varar den över 5 s sägs i stället **"Lite närmare."** (närmare tog bort felläsningarna 29/10, och "håll stilla" upprepat i 35 s fastnar användaren i). Är en vara redan bekräftad tiger motorn (en avvikande läsning är då troligen en felläsning) |
 | 2 | Samma vara lästes **säkert** (inte tunn) minst 2 gånger inom 2 s, ingen konflikt | **Varans namn** ("Tomatpure."), följt av kartans `info` om den finns och sist korgen: **"Tomatpure. 500 gram. Tillagd."**, eller "… Finns redan i korgen." om samma vara skannats förut (ingen dubbel i korgen av misstag; antal kommer med inköpslistan). Finns varan inte i kartan: **"Okänd vara."** Sägs en gång tills varan varit borta i 5 s |
-| 3 | Koden syns men är osäker (tunn eller ogiltig kontrollsiffra), ingen vara bekräftad | Ligger koden i bildens kant: **riktning** (autofokus följer bildens mitt). Annars **"Lite närmare."** |
+| 2b | **En** säker läsning av en ny vara, och den andra har inte kommit på 0,9 s | **"Håll stilla."** Koden är hittad; rör sig användaren tappas den (Elias 6/11: "så fort den säger lite närmare måste man stå still"). Inte för varan som precis skannats. Ändrar inte när namnet sägs |
+| 3 | Koden syns men är osäker (tunn eller ogiltig kontrollsiffra), ingen vara bekräftad | Ligger koden i bildens kant: **riktning** (autofokus följer bildens mitt). Annars **"Sakta närmare."** ("Lite närmare." före 6/11: användaren ryckte närmare och tappade koden. `analyze_scans.py --pixlar` visade att närmare oftast är rätt råd: de flesta osäkra läsningar ligger nära pixelgränsen, så det är *hur* man går närmare som räknas) |
 | 4 | **Ingen kod alls** på 4 s | Korta tips i tur och ordning: **"Håll varan framför dig, en halv armlängd bort."** → **"Vrid varan sakta."** → **"Vänd varan upp och ner."**, och sedan om igen. Användaren ser inte: kommandona ska vara enkla handgrepp, och avstånd anges i armlängd i stället för centimeter (Elias 5/11). Var 6:e s de tre första gångerna, sedan var 10:e s, **utan slut** tills en kod syns. (5/11: med högst 3 gånger blev det tyst i 70 s, och "Ingen kod." lät som "pinkod" med den snabba rösten.) **Efter en lyckad läsning** sägs i stället **"Redo för nästa vara."** en gång, 15 s efter att varan senast syntes, sedan tyst tills en ny kod syns. "Vänd varan" vore fel då, användaren har kanske ingen vara i handen (Elias, 5/11) |
 | 5 | Annars (en säker läsning som väntar på sin andra) | Tystnad |
 
@@ -60,6 +61,7 @@ Takt: minst 1,5 s mellan beskeden, och samma besked upprepas inte oftare än var
 | `min_interval_s` / `repeat_after_s` | 1,5 / 3,0 s (1,8 före 5/11) | Elias 5/11: "lite snabbare" |
 | `conflict_from_thin` | nej | Får en tunn läsning starta en konflikt? Köksprovet 4/11: en tunn felläsning gav "håll stilla" och 4 s extra väntan. Replay 5/11 (81 loggar): 0 fel vara med båda värdena, 44 mot 43 bekräftelser med `nej`. Två säkra läsningar av olika koder ger fortfarande konflikt |
 | `ready_after_s` | 15,0 s | "Redo för nästa vara" så länge efter att en bekräftad vara försvann. 0 stänger av. Startvärde, inte prövat |
+| `steady_after_s` | 0,9 s | "Håll stilla." om den andra säkra läsningen dröjer så länge. I 4K hinner skannern försöka en gång till (2 avkodningar/s). 0 stänger av. Startvärde |
 | `cue_interval_s` / `cue_quiet_s` | 1,0 s / 1,2 s | Pip: högst så här ofta, och inte så här snart efter tal. `cue_interval_s=0` stänger av pipet. Startvärden, inte prövade |
 | `no_code_after_s` / `no_code_repeat_s` / `no_code_fast` / `no_code_slow_repeat_s` | 4,0 s / 6,0 s / 3 / 10,0 s | Första tipset, tätt mellan de 3 första, sedan glest utan slut. `no_code_slow_repeat_s=0` gör det tyst efter de täta, båda 0 stänger av. Startvärden | "Ingen kod": när, hur ofta och hur många gånger per sökning. 0 stänger av. Startvärden, inte prövade |
 
@@ -102,7 +104,7 @@ Syftet: en separat tjänst (t.ex. i C#) ska kunna bygga applikationslogik ovanp�
 ```
 
 - `read`: loggraden för varje avläsning, oförändrad (fälten står i `HANDOFF.md` avsnitt 3 och i `barcode_scanner.py`). `filter` kan innehålla `tunn` och `orimligt djup`.
-- `guidance`: det Pythons egen motor beslutat. `action` är en av `confirmed`, `unknown_product`, `closer`, `code_left`, `code_right`, `code_above`, `code_below`, `hold_still`, `no_code`, `no_code_turn`, `no_code_flip`, `ready`, `code_seen` (pipet, `text` är "♪"). Vid `confirmed` finns även `details` och `basket` (`added` eller `already`; annars `null`). Skickas bara när `--vagledning` är på.
+- `guidance`: det Pythons egen motor beslutat. `action` är en av `confirmed`, `unknown_product`, `closer`, `code_left`, `code_right`, `code_above`, `code_below`, `hold_still`, `steady`, `no_code`, `no_code_turn`, `no_code_flip`, `ready`, `code_seen` (pipet, `text` är "♪"). Vid `confirmed` finns även `details` och `basket` (`added` eller `already`; annars `null`). Skickas bara när `--vagledning` är på.
 - `error`: svar på ett felaktigt kommando.
 
 **In (klient → skanner), bara ett kommando:**

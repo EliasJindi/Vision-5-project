@@ -62,8 +62,8 @@ class GuidanceVoiceTest(unittest.TestCase):
     def test_announce_speaks_and_returns_the_text(self):
         speaker = FakeSpeaker()
         text = GuidanceVoice(speaker).announce(GuidanceAction(ActionKind.CLOSER))
-        self.assertEqual(text, "Lite närmare.")
-        self.assertEqual(speaker.said, [("Lite närmare.", "closer")])
+        self.assertEqual(text, "Sakta närmare.")
+        self.assertEqual(speaker.said, [("Sakta närmare.", "closer")])
 
     def test_convention_decides_the_words(self):
         action = GuidanceAction(ActionKind.CODE_RIGHT)

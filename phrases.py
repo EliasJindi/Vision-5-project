@@ -37,7 +37,8 @@ def format_phrase(label, distance, style=DISTANCE_STYLE):
 # ---------- Röstvägledning (voice_guidance/) ----------
 # Nycklarna är voice_guidance.model.ActionKind.value. Korta fraser: varje ord kostar tid.
 GUIDANCE_PHRASES = {
-    "closer": "Lite närmare.",
+    "closer": "Sakta närmare.",      # "Lite närmare." före 6/11: användaren ryckte närmare och tappade koden
+    "steady": "Håll stilla.",        # en säker läsning väntar på sin andra (6/11). Samma ord som hold_still
     "hold_still": "Håll stilla.",
     "unknown_product": "Okänd vara.",
     # Ingen kod syns: tre tips i tur och ordning, sedan om igen. Elias 5/11: rösten ska blanda sig i mer,
