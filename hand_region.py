@@ -1,0 +1,103 @@
+# ===================== NY FIL AV CLAUDE (2026-11-06) =====================
+# Hittar det som hålls fram mot kameran: det närmaste föremålet inom en armlängd i djupbilden.
+# Idé från Elias 6/11: "man visar alltid produkter med handen", så leta efter handen med varan
+# i stället för i hela bilden. Varan hamnade ofta i bildens nederkant medan autofokus ställde
+# skarpt på bakgrunden i mitten (mosaikerna 6/11). Med rutan kan fokus, ljus och avkodning
+# läggas där varan faktiskt är, och rösten kan guida efter den även när ingen kod syns.
+# Ren numpy, ingen kamera: testas i tests/test_hand_region.py. Används först av tools/narmast.py.
+# =========================================================================
+"""
+hand_region.py - Rutan runt det närmaste föremålet (handen med varan) i en djupbild.
+
+Djupbilden delas i celler (medianen per cell, så att brus och hål inte stör). Celler mellan
+min_mm och max_mm är "nära". Bland dem tas det närmaste skiktet (närmast + band_mm), och av
+det den största sammanhängande ytan. Det skiljer handen från t.ex. en bordskant längre bort.
+"""
+from __future__ import annotations
+
+import warnings
+from collections import deque
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
+
+import numpy as np
+
+
+@dataclass(frozen=True)
+class NearRegion:
+    """Rutan i normaliserade koordinater: (0,0) = övre vänstra hörnet, (1,1) = nedre högra."""
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    depth_m: float      # medianavstånd till ytan
+    area: float         # andel av bilden
+
+    @property
+    def center(self) -> Tuple[float, float]:
+        return (self.x0 + self.x1) / 2, (self.y0 + self.y1) / 2
+
+    def to_pixels(self, width: int, height: int) -> Tuple[int, int, int, int]:
+        """(x, y, bredd, höjd) i en bild av given storlek."""
+        x, y = int(self.x0 * width), int(self.y0 * height)
+        return x, y, max(1, int(self.x1 * width) - x), max(1, int(self.y1 * height) - y)
+
+
+def cell_medians(depth_mm: np.ndarray, cell: int, min_valid: float = 0.3) -> np.ndarray:
+    """Median per cell (mm). NaN där för få pixlar har djup (0 = inget djup)."""
+    h, w = depth_mm.shape[:2]
+    gh, gw = h // cell, w // cell
+    if gh == 0 or gw == 0:
+        raise ValueError(f"djupbilden {w}x{h} är mindre än en cell ({cell} px)")
+    blocks = depth_mm[:gh * cell, :gw * cell].astype(np.float32)
+    blocks = blocks.reshape(gh, cell, gw, cell).transpose(0, 2, 1, 3).reshape(gh, gw, cell * cell)
+    blocks[blocks <= 0] = np.nan
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)   # celler helt utan djup ger NaN, det är meningen
+        med = np.nanmedian(blocks, axis=2)
+    valid = np.mean(~np.isnan(blocks), axis=2) >= min_valid
+    return np.where(valid, med, np.nan)
+
+
+def _components(mask: np.ndarray) -> List[List[Tuple[int, int]]]:
+    """Sammanhängande ytor (4-grannar) i en boolesk matris."""
+    seen = np.zeros_like(mask, dtype=bool)
+    parts = []
+    for start in zip(*np.nonzero(mask)):
+        if seen[start]:
+            continue
+        seen[start] = True
+        part, todo = [], deque([start])
+        while todo:
+            y, x = todo.popleft()
+            part.append((y, x))
+            for ny, nx in ((y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)):
+                if 0 <= ny < mask.shape[0] and 0 <= nx < mask.shape[1] and mask[ny, nx] and not seen[ny, nx]:
+                    seen[ny, nx] = True
+                    todo.append((ny, nx))
+        parts.append(part)
+    return parts
+
+
+def find_near_region(depth_mm: np.ndarray, min_mm: int = 200, max_mm: int = 800, band_mm: int = 150,
+                     cell: int = 20, min_cells: int = 6) -> Optional[NearRegion]:
+    """
+    Rutan runt det närmaste föremålet inom [min_mm, max_mm], eller None.
+    min_mm 200: närmare än ~20 cm finns inget djup. max_mm 800: ungefär en armlängd.
+    band_mm 150: hand och vara räknas som samma skikt, en bordskant längre bort inte.
+    min_cells 6: mindre ytor är brus.
+    """
+    med = cell_medians(depth_mm, cell)
+    near = (med >= min_mm) & (med <= max_mm)          # NaN ger False
+    if not near.any():
+        return None
+    closest = float(np.percentile(med[near], 5))      # inte minimum: en enda brusig cell ska inte styra
+    layer = near & (med <= closest + band_mm)
+    parts = [p for p in _components(layer) if len(p) >= min_cells]
+    if not parts:
+        return None
+    part = max(parts, key=len)
+    ys, xs = zip(*part)
+    gh, gw = med.shape
+    return NearRegion(x0=min(xs) / gw, y0=min(ys) / gh, x1=(max(xs) + 1) / gw, y1=(max(ys) + 1) / gh,
+                      depth_m=float(np.median([med[p] for p in part])) / 1000, area=len(part) / (gh * gw))
