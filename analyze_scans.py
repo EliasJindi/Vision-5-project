@@ -6,6 +6,10 @@
 #   långt in i körningen de kom. Gamla loggar utan de nya fälten räknas om från hornen.
 # Läser bara loggarna, ändrar ingenting. Trasiga rader (strömavbrott) hoppas över.
 # Reglerna läses från scan_filters.py, så skriptet går även på en dator utan kameran.
+# 2026-11-06: --pixlar visar, per läge, hur ofta läsningarna är säkra respektive osäkra (tunna eller
+#   ogiltig kontrollsiffra) vid olika px/modul. Underlag för om röstvägledningen ska säga "håll stilla"
+#   i stället för "lite närmare" när en osäker kod redan är stor nog. Samma definition av säker som
+#   rösten (voice_guidance.model.CodeRead). Utan flaggan är utskriften som förut.
 # =========================================================================
 """
 analyze_scans.py - Utvärderar höjd- och djupfiltren på skannerloggarna.
@@ -14,11 +18,13 @@ Användning:
     python3 analyze_scans.py                              # alla logs/scan_*.jsonl
     python3 analyze_scans.py logs/scan_20261020_*.jsonl   # bara vissa loggar
     python3 analyze_scans.py --utan 20261017_140916       # utan körningar vars namn innehåller texten
+    python3 analyze_scans.py --pixlar                     # säkra/osäkra läsningar per px/modul (röstvägledningen)
 """
 import argparse
 import glob
 import json
 import os
+import statistics
 from collections import Counter
 
 from scan_filters import DEPTH_FACTOR, MIN_HEIGHT_RATIO, depth_plausible, expected_depth, size_from_corners
@@ -70,17 +76,112 @@ def height_rules(reads, title):
               f"kastar {lost:4d} av {len(right)} rätta ({lost / max(len(right), 1):4.0%})")
 
 
+PX_EDGES = (1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.5)   # gränser för px/modul-grupperna
+HOLD_LIMITS = (2.25, 2.5, 2.75, 3.0)                     # tänkta trösklar för "håll stilla"
+
+
+def mode_of(rec, log_name):
+    """Läget ur raden, annars ur filnamnet (scan_<datum>_<tid>_<läge>.jsonl)."""
+    if rec.get("mode"):
+        return rec["mode"]
+    for mode in ("4k", "1080p"):
+        if log_name.endswith(f"_{mode}.jsonl"):
+            return mode
+    return "okänt"
+
+
+def pixel_samples(logs):
+    """{läge: [(px_per_modul, säker, loggnamn), ...]}. Rader utan px eller hörn hoppas över."""
+    from voice_guidance.model import CodeRead   # samma regel som rösten; importeras här så att resten går utan
+    samples = {}
+    for name, rows in logs.items():
+        for rec in rows:
+            px = rec.get("px_per_modul")
+            if not isinstance(px, (int, float)) or px <= 0:
+                continue
+            try:
+                reliable = CodeRead.from_record(rec).reliable
+            except ValueError:
+                continue
+            samples.setdefault(mode_of(rec, name), []).append((float(px), reliable, name))
+    return samples
+
+
+def bucket_of(px):
+    for i, edge in enumerate(PX_EDGES):
+        if px < edge:
+            return i
+    return len(PX_EDGES)
+
+
+def bucket_label(i):
+    if i == 0:
+        return f"under {PX_EDGES[0]:.2f}"
+    if i == len(PX_EDGES):
+        return f"minst {PX_EDGES[-1]:.2f}"
+    return f"{PX_EDGES[i - 1]:.2f}–{PX_EDGES[i]:.2f}"
+
+
+def quantile(values, q):
+    values = sorted(values)
+    return values[min(len(values) - 1, int(q * len(values)))]
+
+
+def comma(x, digits=2):
+    return f"{x:.{digits}f}".replace(".", ",")
+
+
+def pixel_report(logs):
+    samples = pixel_samples(logs)
+    if not samples:
+        print("Inga läsningar med px/modul och hörn i loggarna.")
+        return
+    print("Säkra och osäkra läsningar per px/modul. Osäker = tunn remsa eller ogiltig kontrollsiffra:")
+    print("då säger rösten \"lite närmare\" eller en riktning. Varje körning räknas med alla sina läsningar,")
+    print("så titta på kolumnen körningar: en grupp från en enda körning säger lite.")
+    for mode in sorted(samples):
+        rows = samples[mode]
+        safe = [px for px, ok, _ in rows if ok]
+        unsafe = [px for px, ok, _ in rows if not ok]
+        print(f"\n{mode}: {len(safe)} säkra, {len(unsafe)} osäkra, från {len({n for *_, n in rows})} körningar")
+        print(f"  {'px/modul':12s} {'säkra':>6s} {'osäkra':>7s} {'andel säkra':>12s} {'körningar':>10s}")
+        for i in range(len(PX_EDGES) + 1):
+            group = [(ok, n) for px, ok, n in rows if bucket_of(px) == i]
+            if not group:
+                continue
+            n_safe = sum(ok for ok, _ in group)
+            print(f"  {bucket_label(i).replace('.', ','):12s} {n_safe:6d} {len(group) - n_safe:7d} "
+                  f"{n_safe / len(group):11.0%} {len({n for _, n in group}):10d}")
+        for label, values in (("Osäkra", unsafe), ("Säkra", safe)):
+            if values:
+                print(f"  {label}: median {comma(statistics.median(values))} px/modul "
+                      f"(10–90 %: {comma(quantile(values, 0.1))}–{comma(quantile(values, 0.9))})")
+        if unsafe:
+            print("  Tänkt regel: osäker men minst T px/modul -> \"håll stilla\" i stället för \"lite närmare\"")
+            for limit in HOLD_LIMITS:
+                hold = sum(px >= limit for px in unsafe)
+                big = [ok for px, ok, _ in rows if px >= limit]
+                share = f"{sum(big) / len(big):.0%} av läsningarna var säkra" if big else "inga läsningar"
+                print(f"    T = {comma(limit)}: {hold} av {len(unsafe)} osäkra skulle få \"håll stilla\"; "
+                      f"vid minst T: {share} ({len(big)} st)")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Utvärderar höjd- och djupfiltren på skannerloggarna")
     ap.add_argument("loggar", nargs="*")
     ap.add_argument("--utan", action="append", default=[], metavar="TEXT",
                     help="hoppa över loggar vars namn innehåller TEXT (kan anges flera gånger)")
+    ap.add_argument("--pixlar", action="store_true",
+                    help="visa bara säkra/osäkra läsningar per px/modul (underlag för röstvägledningen)")
     args = ap.parse_args()
     paths = sorted(args.loggar or glob.glob("logs/scan_*.jsonl"))
     paths = [p for p in paths if not any(u in os.path.basename(p) for u in args.utan)]
     if not paths:
         raise SystemExit("Inga loggar hittades.")
     logs = {os.path.basename(p): read_log(p) for p in paths}
+    if args.pixlar:
+        pixel_report(logs)
+        return
 
     # --- Höjd ---
     per_file = {}
