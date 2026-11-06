@@ -88,6 +88,32 @@ class FakeDevice:
     def getOutputQueue(self, **kwargs):
         return self._queue
 
+    def getInputQueue(self, name):
+        self.control = ControlRecorder()
+        FakeDevice.last = self
+        return self.control
+
+
+class ControlRecorder:
+    """Kontrollkanalen till kameran (--hand): sparar det som skickas."""
+
+    def __init__(self):
+        self.sent = []
+
+    def send(self, ctrl):
+        self.sent.append(ctrl)
+
+
+class FakeCameraControl:
+    def __init__(self):
+        self.calls = []
+
+    def setAutoFocusRegion(self, *args):
+        self.calls.append(("focus", args))
+
+    def setAutoExposureRegion(self, *args):
+        self.calls.append(("exposure", args))
+
 
 class FakeClock:
     """time.time() som går 0,4 s per anrop, så att varje bildruta passerar skannerns egen takt."""
@@ -98,6 +124,10 @@ class FakeClock:
     def time(self):
         self._now += 0.4
         return self._now
+
+    def perf_counter(self):
+        import time
+        return time.perf_counter()
 
     def strftime(self, *args):
         import time
@@ -124,11 +154,13 @@ class ScannerMainTest(unittest.TestCase):
         with open(self.karta, "w", encoding="utf-8") as f:
             json.dump({"type": "FeatureCollection", "features": [feature]}, f)
 
-    def run_scanner(self, *flags, frames=6, ean=EAN_A):
+    def run_scanner(self, *flags, frames=6, ean=EAN_A, depth=None, center=(960, 540)):
         import barcode_scanner
-        message = {"color": FakeFrame(barcode_frame(ean)), "depth": FakeFrame(np.full((720, 1280), 300, np.uint16))}
+        depth = np.full((720, 1280), 300, np.uint16) if depth is None else depth
+        message = {"color": FakeFrame(barcode_frame(ean, center=center)), "depth": FakeFrame(depth)}
         fake_dai = types.SimpleNamespace(Device=lambda pipeline: FakeDevice(FakeQueue(message, frames)),
-                                         UsbSpeed=types.SimpleNamespace(SUPER=1, SUPER_PLUS=2))
+                                         UsbSpeed=types.SimpleNamespace(SUPER=1, SUPER_PLUS=2),
+                                         CameraControl=FakeCameraControl)
         argv = ["barcode_scanner.py", self.karta, "--facit", EAN_A, *flags]
         out, cwd = io.StringIO(), os.getcwd()
         os.chdir(self.folder.name)
@@ -179,13 +211,13 @@ class ScannerMainTest(unittest.TestCase):
     def test_focus_region_flag_reaches_the_pipeline_and_is_shown(self):
         out = self.run_scanner("--fokusruta")
         self.assertIn("bara rutan i mitten (40 % av bredd och höjd)", out)
-        self.build.assert_called_once_with(uhd=False, focus=None, focus_share=0.4)
+        self.build.assert_called_once_with(uhd=False, focus=None, focus_share=0.4, hand=False)
         self.run_scanner("--fokusruta", "0.25", "--4k")
-        self.build.assert_called_once_with(uhd=True, focus=None, focus_share=0.25)
+        self.build.assert_called_once_with(uhd=True, focus=None, focus_share=0.25, hand=False)
 
     def test_without_the_flag_autofocus_is_unchanged(self):
         self.run_scanner()
-        self.build.assert_called_once_with(uhd=False, focus=None, focus_share=None)
+        self.build.assert_called_once_with(uhd=False, focus=None, focus_share=None, hand=False)
 
     def test_focus_region_and_locked_focus_cannot_be_combined(self):
         for flags in (("--fokusruta", "--fokus", "70"), ("--fokusruta", "0.05"), ("--fokusruta", "1.5")):
@@ -198,6 +230,45 @@ class ScannerMainTest(unittest.TestCase):
         self.assertEqual(barcode_scanner.focus_region(3840, 2160, 1.0), (0, 0, 3840, 2160))
         with self.assertRaises(ValueError):
             barcode_scanner.focus_region(1920, 1080, 0)
+
+    def test_hand_mode_reads_the_code_in_the_hand_with_the_same_corners(self):
+        self.run_scanner(center=(1300, 800))
+        plain = self.log_records()
+        os.remove(os.path.join(self.folder.name, "logs", [f for f in os.listdir(os.path.join(self.folder.name, "logs"))
+                                                          if f.endswith(".jsonl")][0]))
+        depth = np.full((720, 1280), 1500, np.uint16)
+        depth[400:720, 700:1100] = 350                                    # handen nere till höger, som 6/11
+        out = self.run_scanner("--hand", center=(1300, 800), depth=depth)
+        hand = self.log_records()
+        self.assertIn("Fokus: autofokus och ljus följer handen", out)
+        self.assertEqual({r["avkodat_i"] for r in hand}, {"ruta"})
+        # Samma koordinater som utan handruta. zxing kan hamna 1 px annorlunda i en beskuren bild, inte mer.
+        for got, want in zip(hand, plain):
+            for (gx, gy), (wx, wy) in zip(got["hornen"], want["hornen"]):
+                self.assertLessEqual(max(abs(gx - wx), abs(gy - wy)), 1, (got["hornen"], want["hornen"]))
+        self.assertEqual(len(hand), len(plain))
+        self.assertAlmostEqual(hand[0]["hand_m"], 0.35, delta=0.01)
+        self.assertIn("koden hittad i handrutan 6 gånger", out)
+        sent = FakeDevice.last.control.sent
+        self.assertEqual(len(sent), 1)                                    # handen står still: en gång räcker
+        self.assertEqual([kind for kind, _ in sent[0].calls], ["focus", "exposure"])
+
+    def test_a_code_outside_the_hand_is_still_found(self):
+        depth = np.full((720, 1280), 1500, np.uint16)
+        depth[0:200, 0:300] = 350                                         # "handen" uppe till vänster, koden i mitten
+        self.run_scanner("--hand", depth=depth)
+        self.assertEqual({r["avkodat_i"] for r in self.log_records()}, {"hela"})
+
+    def test_without_a_hand_nothing_is_sent_and_the_whole_image_is_read(self):
+        out = self.run_scanner("--hand", depth=np.full((720, 1280), 1500, np.uint16))
+        self.assertEqual(FakeDevice.last.control.sent, [])
+        self.assertEqual({r["avkodat_i"] for r in self.log_records()}, {"hela"})
+        self.assertIn("Hand: hittad i 0 av", out)
+
+    def test_hand_mode_cannot_be_combined_with_other_focus_flags(self):
+        for flags in (("--hand", "--fokus", "70"), ("--hand", "--fokusruta")):
+            with self.subTest(flags=flags), self.assertRaises(SystemExit):
+                self.run_scanner(*flags)
 
     def test_invalid_port_is_rejected(self):
         with self.assertRaises(SystemExit):
