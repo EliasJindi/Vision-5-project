@@ -98,6 +98,14 @@
 #     och höjd), så att bakgrunden inte drar iväg fokus (B2 i förslaget 20/10). Utan flaggan som förut.
 #     Rutan räknas i ISP-bildens pixlar. Det är inte verifierat på kameran att DepthAI tolkar dem så: se
 #     linspositionen i --diag. (2026-11-05)
+# 35. --hand (Elias idé 6/11: "man visar alltid produkter med handen"): det närmaste föremålet inom en
+#     armlängd i djupbilden (hand_region.py) räknas som handen med varan. a) Kamerans autofokus OCH
+#     exponering ställs in på den rutan via en kontrollkanal (XLinkIn "control"), högst två gånger per
+#     sekund och bara när handen flyttat sig. Borta i 1 s: tillbaka till hela bilden. b) Rutan (med
+#     marginal) avkodas först; hittas inget där avkodas hela bilden som förut, så en felaktig ruta kan
+#     aldrig dölja en kod. Loggen får "hand", "hand_m" och "avkodat_i"; sammanfattningen visar
+#     avkodningstiden. Rutan är testad med tools/narmast.py (8 av 8 bilder på handen); styrningen av
+#     fokus är inte testad på kameran när den skrevs. (2026-11-06)
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
@@ -119,6 +127,7 @@ Kör:     python3 barcode_scanner.py [kartor/produkter.geojson] [--diag] [--4k] 
          --vagledning text|tal  röstvägledning: skriv ut eller läs upp beskeden (voice_guidance/)
          --sikte huvud|hand     riktningarna: vrid huvudet mot koden, eller flytta varan
          --lank PORT            länk till andra program på 127.0.0.1:PORT (JSON-rader)
+         --hand                 fokus, ljus och avkodning följer handen med varan (ändring 35)
 Logg:    logs/scan_<datum>_<tid>_<4k|1080p>.jsonl (en rad per avläsning)
 """
 import argparse
@@ -134,6 +143,7 @@ import depthai as dai
 import numpy as np
 import zxingcpp
 
+from hand_region import HandFocus, find_near_region
 from scan_filters import FILTER_TEXT, depth_plausible, expected_depth, is_thin, modules_for, size_from_corners
 from voice_guidance import AimConvention, GuidanceMode, create_session
 from voice_guidance.catalog import parse_details
@@ -231,7 +241,7 @@ def focus_region(width, height, share):
     return (width - w) // 2, (height - h) // 2, w, h
 
 
-def build_pipeline(uhd=False, focus=None, focus_share=None):
+def build_pipeline(uhd=False, focus=None, focus_share=None, hand=False):
     pipeline = dai.Pipeline()
     fps = UHD_FPS if uhd else CAMERA_FPS
 
@@ -277,7 +287,56 @@ def build_pipeline(uhd=False, focus=None, focus_share=None):
     xout = pipeline.create(dai.node.XLinkOut)
     xout.setStreamName("out")
     sync.out.link(xout.input)
+
+    if hand:
+        # Kontrollkanal: skannern flyttar autofokus och exponering till handen medan den kör (ändring 35)
+        control = pipeline.create(dai.node.XLinkIn)
+        control.setStreamName("control")
+        control.out.link(cam.inputControl)
     return pipeline
+
+
+class _Point:
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+
+
+class _Position:
+    def __init__(self, position, dx, dy):
+        for corner in ("top_left", "top_right", "bottom_right", "bottom_left"):
+            p = getattr(position, corner)
+            setattr(self, corner, _Point(p.x + dx, p.y + dy))
+
+
+class ShiftedResult:
+    """En zxing-läsning från en utskuren ruta, med hörnen flyttade till hela bildens koordinater."""
+
+    def __init__(self, result, dx, dy):
+        self.text, self.format = result.text, result.format
+        self.position = _Position(result.position, dx, dy)
+
+
+def decode_frame(color, crop=None):
+    """
+    Avkodar rutan crop (hand_region.NearRegion) först, och hela bilden om inget hittades där (ändring 35).
+    Returnerar (läsningar, "ruta" eller "hela").
+    """
+    if crop is not None:
+        h, w = color.shape[:2]
+        x, y, cw, ch = crop.to_pixels(w, h)
+        found = zxingcpp.read_barcodes(np.ascontiguousarray(color[y:y + ch, x:x + cw]), formats=BARCODE_FORMATS)
+        if found:
+            return [ShiftedResult(r, x, y) for r in found], "ruta"
+    return zxingcpp.read_barcodes(color, formats=BARCODE_FORMATS), "hela"
+
+
+def send_focus(control_queue, command, width, height):
+    """Flyttar kamerans autofokus och exponering till handen, eller tillbaka till hela bilden."""
+    x, y, w, h = command.region.to_pixels(width, height) if command.region else (0, 0, width, height)
+    ctrl = dai.CameraControl()
+    ctrl.setAutoFocusRegion(x, y, w, h)
+    ctrl.setAutoExposureRegion(x, y, w, h)
+    control_queue.send(ctrl)
 
 
 def _median_m(region):
@@ -491,6 +550,11 @@ def print_summary(mode, facit, stats, log_path, use_filter=False):
         if stats["seq_first"] is not None and stats["seq_last"] is not None:
             line += f", {(stats['seq_last'] - stats['seq_first']) / span:.1f}/s enligt kamerans sekvensnummer"
         print(line + f" (inställt {stats['fps_set']} fps, skannern avkodar högst {stats['scan_max']:.0f}/s)")
+    if stats.get("decode_ms"):
+        print(f"  Avkodning: median {np.median(stats['decode_ms']):.0f} ms per bild (max {max(stats['decode_ms']):.0f} ms)")
+    if stats.get("hand_mode") and stats.get("decode_ms"):
+        print(f"  Hand: hittad i {stats['hand_frames']} av {len(stats['decode_ms'])} avkodade bildrutor, "
+              f"koden hittad i handrutan {stats['crop_hits']} gånger")
     print(f"  Filter ({'PÅ' if use_filter else 'AV, bara loggat'}):")
     if not stats["filtered"]:
         print("    inga läsningar fångades")
@@ -511,10 +575,15 @@ def diagnose(color, results, n_saved, folder, meta=None):
     status = (f"📷 ljus {brightness:3.0f}/255 ({'mörkt' if brightness < 60 else 'ok'})  "
               f"skärpa {sharpness:5.0f} ({'suddigt' if sharpness < 50 else 'ok'})  "
               f"{'lins %3d  ' % meta['lins'] if meta and 'lins' in meta else ''}"
+              f"{'hand %.2f m  ' % meta['hand_m'] if meta and 'hand_m' in meta else ''}"
               f"koder: {[r.text for r in results] or 'inga'}")
 
     if n_saved < DIAG_MAX_IMAGES:
         img = color.copy()
+        if meta and "hand" in meta:   # blå ruta: det skannern tror är handen med varan (ändring 35)
+            h, w = img.shape[:2]
+            x0, y0, x1, y1 = meta["hand"]
+            cv2.rectangle(img, (int(x0 * w), int(y0 * h)), (int(x1 * w), int(y1 * h)), (255, 128, 0), 6)
         for r in results:
             pts = np.array([[c.x, c.y] for c in (r.position.top_left, r.position.top_right,
                                                  r.position.bottom_right, r.position.bottom_left)], np.int32)
@@ -537,6 +606,8 @@ def main():
                     help="lås linsen på position N (0-255) i stället för autofokus")
     ap.add_argument("--fokusruta", type=float, nargs="?", const=FOCUS_REGION_DEFAULT, metavar="ANDEL",
                     help=f"autofokus bara på en ruta mitt i bilden (andel av bredd och höjd, standard {FOCUS_REGION_DEFAULT})")
+    ap.add_argument("--hand", action="store_true",
+                    help="fokus, ljus och avkodning på det närmaste föremålet inom en armlängd (handen med varan)")
     ap.add_argument("--facit", metavar="EAN",
                     help="rätt streckkod i testet: loggar varje läsning som rätt/fel och märker felläsningar")
     ap.add_argument("--filter", action="store_true",
@@ -554,6 +625,8 @@ def main():
         sys.exit(f"❌ --fokusruta {args.fokusruta} ska ligga mellan 0,1 och 1,0")
     if args.fokusruta is not None and args.fokus is not None:
         sys.exit("❌ --fokus låser linsen och --fokusruta styr autofokus: välj en av dem")
+    if args.hand and (args.fokus is not None or args.fokusruta is not None):
+        sys.exit("❌ --hand styr fokus själv: använd den utan --fokus och --fokusruta")
     if args.lank is not None and not 0 <= args.lank <= 65535:
         sys.exit(f"❌ --lank {args.lank} är ingen giltig port (0-65535)")
     facit = None
@@ -572,7 +645,8 @@ def main():
     stats = {"reads": 0, "right": 0, "wrong": 0, "px_right": [], "px_wrong": [],
              "tries": 0, "hit_frames": 0, "right_frames": 0, "lens_all": [], "lens_hit": [],
              "filtered": {}, "kept_right": 0, "kept_wrong": 0, "right_frames_kept": 0,
-             "msgs": 0, "t_first": None, "t_last": None, "seq_first": None, "seq_last": None}
+             "msgs": 0, "t_first": None, "t_last": None, "seq_first": None, "seq_last": None,
+             "decode_ms": [], "hand_frames": 0, "crop_hits": 0, "hand_mode": args.hand}
     if facit:
         print(f"Facit: {facit}. Felläsningar markeras.")
 
@@ -584,19 +658,23 @@ def main():
                                  AimConvention.HEAD if args.sikte == "huvud" else AimConvention.HAND, args.lank)
     except OSError as e:   # t.ex. porten är upptagen
         sys.exit(f"❌ Kunde inte öppna länken på port {args.lank}: {e}")
-    with dai.Device(build_pipeline(uhd=args.uhd, focus=args.fokus, focus_share=args.fokusruta)) as device, open(log_path, "a", encoding="utf-8") as log:
+    with dai.Device(build_pipeline(uhd=args.uhd, focus=args.fokus, focus_share=args.fokusruta, hand=args.hand)) as device, open(log_path, "a", encoding="utf-8") as log:
         usb = device.getUsbSpeed()
         print(f"Kamera: {'4K 3840x2160 @ ' + str(UHD_FPS) if args.uhd else '1080p @ ' + str(CAMERA_FPS)} fps, USB {usb.name}")
         if args.fokus is not None:
             print(f"Fokus: manuell, linsposition {args.fokus}")
         elif args.fokusruta is not None:
             print(f"Fokus: autofokus, bara rutan i mitten ({args.fokusruta * 100:.0f} % av bredd och höjd)")
+        elif args.hand:
+            print("Fokus: autofokus och ljus följer handen (det närmaste inom en armlängd), annars hela bilden")
         else:
             print("Fokus: autofokus")
         print(f"Filter: {'PÅ (avvisar tunna remsor, ingen position vid orimligt djup)' if args.filter else 'AV (loggas och märks bara)'}")
         if args.uhd and usb not in (dai.UsbSpeed.SUPER, dai.UsbSpeed.SUPER_PLUS):
             print("⚠️  4K kräver USB3 (blå port). Med USB2 kan bilden hacka eller utebli.")
         q = device.getOutputQueue(name="out", maxSize=4, blocking=False)
+        control_q = device.getInputQueue("control") if args.hand else None
+        hand_focus = HandFocus() if args.hand else None
         print(f"Söker efter streckkoder (max ~{1 / scan_interval:.0f}/s). Loggar till {log_path}. Ctrl+C avslutar.")
         last_scan = last_diag = 0.0
         started = time.time()
@@ -627,7 +705,22 @@ def main():
                 color = msg["color"].getCvFrame()
                 meta = frame_meta(msg["color"])
                 depth = msg["depth"].getFrame()   # uint16, millimeter
-                results = zxingcpp.read_barcodes(color, formats=BARCODE_FORMATS)
+                t_decode = time.perf_counter()
+                if hand_focus is not None:
+                    region = find_near_region(depth)
+                    command = hand_focus.update(now, region)
+                    if command is not None:
+                        send_focus(control_q, command, color.shape[1], color.shape[0])
+                    results, where = decode_frame(color, hand_focus.crop(now))
+                    meta["avkodat_i"] = where
+                    if region is not None:
+                        meta["hand"] = [round(v, 3) for v in (region.x0, region.y0, region.x1, region.y1)]
+                        meta["hand_m"] = round(region.depth_m, 3)
+                else:
+                    results, where = decode_frame(color)
+                stats["decode_ms"].append((time.perf_counter() - t_decode) * 1000)
+                stats["hand_frames"] += "hand" in meta
+                stats["crop_hits"] += where == "ruta"
                 recs = [handle_barcode(res, color, depth, products, log, now, mode, facit, stats, meta, args.filter)
                         for res in results]
                 session.on_frame(now, recs)   # röstvägledning och länk (ändring 29-31), även utan läsning

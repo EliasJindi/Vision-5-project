@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from hand_region import NearRegion, cell_medians, find_near_region
+from hand_region import FocusCommand, HandFocus, NearRegion, cell_medians, find_near_region
 
 H, W = 720, 1280
 
@@ -80,6 +80,55 @@ class HelpersTest(unittest.TestCase):
         region = NearRegion(0.25, 0.5, 0.75, 1.0, 0.4, 0.1)
         self.assertEqual(region.to_pixels(3840, 2160), (960, 1080, 1920, 1080))
         self.assertEqual(region.center, (0.5, 0.75))
+
+
+def box(x0, y0, x1, y1):
+    return NearRegion(x0, y0, x1, y1, 0.35, (x1 - x0) * (y1 - y0))
+
+
+class ExpandedTest(unittest.TestCase):
+    def test_margin_is_added_but_kept_inside_the_image(self):
+        r = box(0.05, 0.5, 0.6, 0.95).expanded(0.1)
+        self.assertEqual(tuple(round(v, 2) for v in (r.x0, r.y0, r.x1, r.y1)), (0.0, 0.4, 0.7, 1.0))
+
+
+class HandFocusTest(unittest.TestCase):
+    def setUp(self):
+        self.focus = HandFocus()
+        self.hand = box(0.45, 0.45, 0.9, 0.95)
+
+    def test_the_first_hand_is_sent_at_once(self):
+        self.assertEqual(self.focus.update(0.0, self.hand), FocusCommand(self.hand))
+
+    def test_a_still_hand_is_not_sent_again(self):
+        self.focus.update(0.0, self.hand)
+        for t in (0.5, 1.0, 1.5):
+            self.assertIsNone(self.focus.update(t, box(0.46, 0.45, 0.91, 0.95)), t)   # 1 % flytt: brus
+
+    def test_a_moved_hand_is_sent_but_not_more_often_than_twice_a_second(self):
+        self.focus.update(0.0, self.hand)
+        moved = box(0.2, 0.45, 0.65, 0.95)
+        self.assertIsNone(self.focus.update(0.3, moved))                    # för tätt
+        self.assertEqual(self.focus.update(0.6, moved), FocusCommand(moved))
+
+    def test_a_hand_that_grows_counts_as_moved(self):
+        self.focus.update(0.0, self.hand)
+        closer = box(0.4, 0.35, 0.95, 1.0)                                  # samma mitt, större
+        self.assertEqual(self.focus.update(1.0, closer).region, closer)
+
+    def test_focus_returns_to_the_whole_image_when_the_hand_is_gone(self):
+        self.focus.update(0.0, self.hand)
+        self.assertIsNone(self.focus.update(0.5, None))                     # kort tapp: behåll
+        self.assertEqual(self.focus.update(1.5, None), FocusCommand(None))
+        self.assertIsNone(self.focus.update(2.0, None))                     # bara en gång
+
+    def test_crop_is_the_hand_with_margin_until_it_is_lost(self):
+        self.focus.update(0.0, self.hand)
+        crop = self.focus.crop(0.5)
+        self.assertAlmostEqual(crop.x0, 0.35)
+        self.assertAlmostEqual(crop.y1, 1.0)
+        self.assertIsNone(self.focus.crop(1.5))
+        self.assertIsNone(HandFocus().crop(0.0))
 
 
 if __name__ == "__main__":

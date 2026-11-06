@@ -5,6 +5,9 @@
 # skarpt på bakgrunden i mitten (mosaikerna 6/11). Med rutan kan fokus, ljus och avkodning
 # läggas där varan faktiskt är, och rösten kan guida efter den även när ingen kod syns.
 # Ren numpy, ingen kamera: testas i tests/test_hand_region.py. Används först av tools/narmast.py.
+# 2026-11-06 (steg 2): HandFocus bestämmer när kamerans fokus och ljus ska flyttas till handen och
+#   vilken ruta skannern ska läsa först (barcode_scanner.py --hand). tools/narmast.py visade rutan
+#   på handen med varan i 8 av 8 bilder.
 # =========================================================================
 """
 hand_region.py - Rutan runt det närmaste föremålet (handen med varan) i en djupbild.
@@ -36,6 +39,15 @@ class NearRegion:
     @property
     def center(self) -> Tuple[float, float]:
         return (self.x0 + self.x1) / 2, (self.y0 + self.y1) / 2
+
+    @property
+    def size(self) -> Tuple[float, float]:
+        return self.x1 - self.x0, self.y1 - self.y0
+
+    def expanded(self, margin: float) -> "NearRegion":
+        """Större åt alla håll med margin (andel av bilden), men inom bilden."""
+        return NearRegion(max(0.0, self.x0 - margin), max(0.0, self.y0 - margin),
+                          min(1.0, self.x1 + margin), min(1.0, self.y1 + margin), self.depth_m, self.area)
 
     def to_pixels(self, width: int, height: int) -> Tuple[int, int, int, int]:
         """(x, y, bredd, höjd) i en bild av given storlek."""
@@ -101,3 +113,53 @@ def find_near_region(depth_mm: np.ndarray, min_mm: int = 200, max_mm: int = 800,
     gh, gw = med.shape
     return NearRegion(x0=min(xs) / gw, y0=min(ys) / gh, x1=(max(xs) + 1) / gw, y1=(max(ys) + 1) / gh,
                       depth_m=float(np.median([med[p] for p in part])) / 1000, area=len(part) / (gh * gw))
+
+
+@dataclass(frozen=True)
+class FocusCommand:
+    """Flytta kamerans fokus och ljus till region, eller tillbaka till hela bilden (region None)."""
+    region: Optional[NearRegion]
+
+
+class HandFocus:
+    """
+    Följer handen mellan bildrutorna. update() säger när kameran ska få en ny fokusruta (bara när
+    handen flyttat sig märkbart, och högst var min_interval_s), och när den ska återgå till hela
+    bilden (handen borta i lost_after_s). crop() är rutan som skannern läser först.
+    """
+
+    def __init__(self, min_interval_s: float = 0.5, move: float = 0.05, grow: float = 0.2,
+                 lost_after_s: float = 1.0, margin: float = 0.1) -> None:
+        self._min_interval_s, self._move, self._grow = min_interval_s, move, grow
+        self._lost_after_s, self._margin = lost_after_s, margin
+        self._current: Optional[NearRegion] = None   # senast sedda handen
+        self._sent: Optional[NearRegion] = None      # rutan kameran fokuserar på (None = hela bilden)
+        self._last_seen = float("-inf")
+        self._last_sent = float("-inf")
+
+    def update(self, t: float, region: Optional[NearRegion]) -> Optional[FocusCommand]:
+        if region is not None:
+            self._current, self._last_seen = region, t
+            if self._sent is None or (self._moved(region, self._sent) and t - self._last_sent >= self._min_interval_s):
+                self._sent, self._last_sent = region, t
+                return FocusCommand(region)
+            return None
+        if t - self._last_seen > self._lost_after_s:
+            self._current = None
+            if self._sent is not None:
+                self._sent, self._last_sent = None, t
+                return FocusCommand(None)
+        return None
+
+    def crop(self, t: float) -> Optional[NearRegion]:
+        """Handen med marginal, eller None om den inte setts på lost_after_s."""
+        if self._current is None or t - self._last_seen > self._lost_after_s:
+            return None
+        return self._current.expanded(self._margin)
+
+    def _moved(self, new: NearRegion, old: NearRegion) -> bool:
+        (nx, ny), (ox, oy) = new.center, old.center
+        if abs(nx - ox) > self._move or abs(ny - oy) > self._move:
+            return True
+        (nw, nh), (ow, oh) = new.size, old.size
+        return abs(nw - ow) > self._grow * ow or abs(nh - oh) > self._grow * oh
