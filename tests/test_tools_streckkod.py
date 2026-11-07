@@ -1,6 +1,6 @@
 import unittest
 
-from tools.streckkod import pick_tiles, quads, summarize
+from tools.streckkod import pick_tiles, quads, summarize, zoom_box
 
 
 class QuadsTest(unittest.TestCase):
@@ -39,10 +39,18 @@ class PickTilesTest(unittest.TestCase):
 
 class SummarizeTest(unittest.TestCase):
     def test_counts_only_frames_with_a_hand(self):
-        rows = [(True, True, True), (True, True, False), (True, False, True), (True, False, False),
-                (False, True, True)]
-        self.assertEqual(summarize(rows), {"bilder": 5, "med_hand": 4, "upptackt": 2, "last": 2,
-                                           "upptackt_ej_last": 1, "last_ej_upptackt": 1})
+        rows = [(True, True, True, False), (True, True, False, True), (True, False, True, False),
+                (True, False, False, False), (False, True, True, False), (True, True, False, False)]
+        self.assertEqual(summarize(rows), {"bilder": 6, "med_hand": 5, "upptackt": 3, "last": 2,
+                                           "upptackt_ej_last": 2, "last_ej_upptackt": 1, "raddade": 1})
+
+
+class ZoomBoxTest(unittest.TestCase):
+    def test_margin_follows_the_longest_side_and_stays_inside(self):
+        quad = [(100, 200), (300, 200), (300, 240), (100, 240)]          # 200 bred, 40 hög
+        self.assertEqual(zoom_box(quad, 1920, 1080), (40, 140, 361, 301))   # 30 % av 200 = 60 åt alla håll
+        self.assertEqual(zoom_box([(5, 5), (50, 5), (50, 20), (5, 20)], 1920, 1080)[:2], (0, 0))
+        self.assertEqual(zoom_box([(1900, 1070), (1919, 1070), (1919, 1079), (1900, 1079)], 1920, 1080)[2:], (1920, 1080))
 
 
 if __name__ == "__main__":

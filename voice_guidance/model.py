@@ -94,6 +94,8 @@ class FrameObservation:
     """Allt som lästes i en avkodad bildruta. reads är tom när ingen kod syntes."""
     t: float                          # tid i sekunder (samma klocka som loggen, time.time())
     reads: Tuple[CodeRead, ...] = ()
+    seen: Tuple[Point, ...] = ()      # mitten på koder som detektorn SER men som inte gick att läsa (7/11).
+                                      # Kan aldrig bekräfta en vara, bara vägleda. Gamla loggar: tom
 
 
 @dataclass(frozen=True)

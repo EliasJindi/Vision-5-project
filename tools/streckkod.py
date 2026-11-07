@@ -9,6 +9,8 @@
 #   python3 tools/streckkod.py --sekunder 45 --skala 0.5   (detektorn på halv upplösning: snabbare?)
 #   clear && sleep 15 && python3 tools/streckkod.py      (15 s att ställa sig först). Ctrl+C avslutar och sammanfattar.
 # Mosaiken tar alltid med bilderna där detektorn eller zxing hittade något (7/11: de kom annars inte med).
+# Zoom (7/11, mätning): när detektorn ser en kod som zxing inte läste skärs koden ut, förstoras 2 gånger
+# och läses igen. "Räddade" visar hur ofta det hjälper, och vilka koder som lästes (felläsningar?).
 # Vrid varan under tiden: koden synlig ibland, bortvänd ibland, så syns både träffar och falsklarm.
 # =========================================================================
 import argparse
@@ -29,6 +31,14 @@ def quads(result, dx=0, dy=0, scale=1.0):
     return [[(float(x) / scale + dx, float(y) / scale + dy) for x, y in quad] for quad in points]
 
 
+def zoom_box(quad, width, height, margin=0.3):
+    """Rutan runt en kod (fyra hörn) med marginal i förhållande till kodens längsta sida, inom bilden."""
+    xs, ys = [p[0] for p in quad], [p[1] for p in quad]
+    m = margin * max(max(xs) - min(xs), max(ys) - min(ys), 1.0)
+    return (max(0, int(min(xs) - m)), max(0, int(min(ys) - m)),
+            min(width, int(max(xs) + m) + 1), min(height, int(max(ys) + m) + 1))
+
+
 def pick_tiles(flags, n=16):
     """
     Vilka bilder som kommer med i mosaiken (index i tidsordning). Alla där detektorn eller zxing
@@ -45,15 +55,16 @@ def pick_tiles(flags, n=16):
 
 
 def summarize(rows):
-    """rows: [(hand, upptäckt, läst)]. Räknar det som avgör om detektorn är användbar för rösten."""
+    """rows: [(hand, upptäckt, läst, räddad)]. Räknar det som avgör om detektorn är användbar."""
     with_hand = [r for r in rows if r[0]]
     return {
         "bilder": len(rows),
         "med_hand": len(with_hand),
-        "upptackt": sum(1 for _, found, _ in with_hand if found),
-        "last": sum(1 for _, _, read in with_hand if read),
-        "upptackt_ej_last": sum(1 for _, found, read in with_hand if found and not read),   # "håll stilla"
-        "last_ej_upptackt": sum(1 for _, found, read in with_hand if read and not found),   # detektorn missade
+        "upptackt": sum(1 for _, found, _, _ in with_hand if found),
+        "last": sum(1 for _, _, read, _ in with_hand if read),
+        "upptackt_ej_last": sum(1 for _, found, read, _ in with_hand if found and not read),   # "håll stilla"
+        "last_ej_upptackt": sum(1 for _, found, read, _ in with_hand if read and not found),   # detektorn missade
+        "raddade": sum(1 for _, found, read, saved in with_hand if found and not read and saved),   # zoom hjälpte
     }
 
 
@@ -74,7 +85,7 @@ def main():
         sys.exit("--skala ska ligga mellan 0,1 och 1,0")
     detector = cv2.barcode.BarcodeDetector()
     os.makedirs("logs", exist_ok=True)
-    rows, ms, tiles = [], [], []
+    rows, ms, tiles, rescued_codes = [], [], [], []
     print("Startar kameran. Håll fram varan och vrid den: koden synlig ibland, bortvänd ibland.")
     with dai.Device(bs.build_pipeline(uhd=not args.hd, hand=True)) as device:
         q = device.getOutputQueue(name="out", maxSize=4, blocking=False)
@@ -104,7 +115,14 @@ def main():
                     found = quads(detector.detect(part), x, y, args.skala)
                     ms.append((time.perf_counter() - t) * 1000)
                 results, _ = bs.decode_frame(color, crop)
-                rows.append((region is not None, bool(found), bool(results)))
+                saved = []
+                if found and not results:                    # zoom: skär ut koden, förstora, läs igen
+                    for qd in found:
+                        x0, y0, x1, y1 = zoom_box(qd, color.shape[1], color.shape[0])
+                        big = cv2.resize(color[y0:y1, x0:x1], None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+                        saved += [r.text for r in bs.zxingcpp.read_barcodes(big, formats=bs.BARCODE_FORMATS)]
+                rescued_codes += saved
+                rows.append((region is not None, bool(found), bool(results), bool(saved)))
                 if now - t0 >= 3 and len(tiles) < 200:           # efter uppstarten, högst 200 bilder
                     img = color.copy()
                     if region is not None:
@@ -112,10 +130,11 @@ def main():
                         cv2.rectangle(img, (rx, ry), (rx + rw, ry + rh), (255, 128, 0), 8)
                     for qd in found:
                         cv2.polylines(img, [np.array(qd, np.int32)], True, (0, 255, 255), 8)
-                    text = f"{'hand' if region else 'ingen hand'} | detektor: {'JA' if found else 'nej'} | last: {'JA' if results else 'nej'}"
+                    text = (f"{'hand' if region else 'ingen hand'} | detektor: {'JA' if found else 'nej'} | "
+                            f"last: {'JA' if results else 'nej'}{' | zoom: JA' if saved else ''}")
                     tile = cv2.resize(img, (TILE_W, TILE_H))
                     cv2.putText(tile, text, (8, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
-                    tiles.append((tile, bool(found or results)))
+                    tiles.append((tile, bool(found or results or saved)))
                     print(f"  {now - t0:5.1f} s  {text}")
         except KeyboardInterrupt:
             print("\nAvbruten: sammanfattar det som hann samlas in.")
@@ -130,6 +149,11 @@ def main():
     print(f"  Detektorn såg en kod i {stats['upptackt']} av dem, zxing läste en kod i {stats['last']}.")
     print(f"  Sedd men inte läst (då skulle rösten säga \"håll stilla\"): {stats['upptackt_ej_last']}")
     print(f"  Läst men inte sedd (detektorn missade): {stats['last_ej_upptackt']}")
+    print(f"  Räddade med zoom (utskuren kod, 2 gånger större): {stats['raddade']} av {stats['upptackt_ej_last']}")
+    if rescued_codes:
+        counts = {c: rescued_codes.count(c) for c in sorted(set(rescued_codes))}
+        print("  Koder som zoomen läste: " + ", ".join(f"{c} ({n})" for c, n in counts.items())
+              + "  <- kontrollera att det är varans riktiga kod")
     if ms:
         print(f"  Detektorn: median {sorted(ms)[len(ms) // 2]:.0f} ms per bild (max {max(ms):.0f} ms), skala {args.skala}")
 

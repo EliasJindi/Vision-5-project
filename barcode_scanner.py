@@ -113,6 +113,11 @@
 #     --fokus och --fokusruta stänger också av det. --hand finns kvar och gör ingenting nytt.
 #     --diag sparar bilderna i en egen mapp per körning, logs/snapshots/<loggens namn>/, så att
 #     tools/mosaik.py kan visa äldre körningar (förut skrevs allt i samma mapp och rensades). (2026-11-07)
+# 37. I handläget körs OpenCV:s streckkodsdetektor på handrutan när zxing inte läste något (Elias idé
+#     7/11: "vänd inte varan när den faktiskt hittar en etikett"). Ser den en kod skickas mitten till
+#     röstvägledningen (regel 3b: "håll stilla" eller en riktning). Detektorn kan aldrig bekräfta en
+#     vara. tools/streckkod.py 7/11: sedd i 20 av 93 bilder med hand, läst i 3, inga synliga falsklarm,
+#     24 ms per bild. Saknas detektorn i OpenCV stängs det av. (2026-11-07)
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
@@ -335,6 +340,30 @@ def decode_frame(color, crop=None):
         if found:
             return [ShiftedResult(r, x, y) for r in found], "ruta"
     return zxingcpp.read_barcodes(color, formats=BARCODE_FORMATS), "hela"
+
+
+def make_detector():
+    """OpenCV:s streckkodsdetektor (ändring 37), eller None om OpenCV saknar den."""
+    try:
+        return cv2.barcode.BarcodeDetector()
+    except AttributeError:
+        return None
+
+
+def seen_codes(detector, color, crop):
+    """
+    Mitten (0-1) på streckkoder som detektorn ser i handrutan crop, i hela bildens koordinater.
+    Tom lista utan detektor eller handruta. Används bara när zxing inte läste något.
+    """
+    if detector is None or crop is None:
+        return []
+    h, w = color.shape[:2]
+    x, y, cw, ch = crop.to_pixels(w, h)
+    ok, points = detector.detect(np.ascontiguousarray(color[y:y + ch, x:x + cw]))
+    if not ok or points is None:
+        return []
+    return [((sum(float(p[0]) for p in quad) / len(quad) + x) / w, (sum(float(p[1]) for p in quad) / len(quad) + y) / h)
+            for quad in points]
 
 
 def send_focus(control_queue, command, width, height):
@@ -567,7 +596,8 @@ def print_summary(mode, facit, stats, log_path, use_filter=False):
         print(f"  Avkodning: median {np.median(stats['decode_ms']):.0f} ms per bild (max {max(stats['decode_ms']):.0f} ms)")
     if stats.get("hand_mode") and stats.get("decode_ms"):
         print(f"  Hand: hittad i {stats['hand_frames']} av {len(stats['decode_ms'])} avkodade bildrutor, "
-              f"koden hittad i handrutan {stats['crop_hits']} gånger")
+              f"koden hittad i handrutan {stats['crop_hits']} gånger, "
+              f"sedd men inte läst i {stats.get('seen_frames', 0)} bildrutor")
     print(f"  Filter ({'PÅ' if use_filter else 'AV, bara loggat'}):")
     if not stats["filtered"]:
         print("    inga läsningar fångades")
@@ -589,6 +619,7 @@ def diagnose(color, results, n_saved, folder, meta=None):
               f"skärpa {sharpness:5.0f} ({'suddigt' if sharpness < 50 else 'ok'})  "
               f"{'lins %3d  ' % meta['lins'] if meta and 'lins' in meta else ''}"
               f"{'hand %.2f m  ' % meta['hand_m'] if meta and 'hand_m' in meta else ''}"
+              f"{'kod sedd  ' if meta and meta.get('sedd') else ''}"
               f"koder: {[r.text for r in results] or 'inga'}")
 
     if n_saved < DIAG_MAX_IMAGES:
@@ -664,7 +695,7 @@ def main():
              "tries": 0, "hit_frames": 0, "right_frames": 0, "lens_all": [], "lens_hit": [],
              "filtered": {}, "kept_right": 0, "kept_wrong": 0, "right_frames_kept": 0,
              "msgs": 0, "t_first": None, "t_last": None, "seq_first": None, "seq_last": None,
-             "decode_ms": [], "hand_frames": 0, "crop_hits": 0, "hand_mode": use_hand}
+             "decode_ms": [], "hand_frames": 0, "crop_hits": 0, "hand_mode": use_hand, "seen_frames": 0}
     if facit:
         print(f"Facit: {facit}. Felläsningar markeras.")
 
@@ -693,6 +724,9 @@ def main():
         q = device.getOutputQueue(name="out", maxSize=4, blocking=False)
         control_q = device.getInputQueue("control") if use_hand else None
         hand_focus = HandFocus() if use_hand else None
+        detector = make_detector() if use_hand else None
+        if use_hand and detector is None:
+            print("ℹ️  OpenCV saknar streckkodsdetektorn: \"håll stilla\" när koden syns men inte går att läsa är avstängt")
         print(f"Söker efter streckkoder (max ~{1 / scan_interval:.0f}/s). Loggar till {log_path}. Ctrl+C avslutar.")
         last_scan = last_diag = 0.0
         started = time.time()
@@ -739,9 +773,13 @@ def main():
                 stats["decode_ms"].append((time.perf_counter() - t_decode) * 1000)
                 stats["hand_frames"] += "hand" in meta
                 stats["crop_hits"] += where == "ruta"
+                seen = [] if results or hand_focus is None else seen_codes(detector, color, hand_focus.crop(now))
+                if seen:
+                    meta["sedd"] = len(seen)
+                    stats["seen_frames"] += 1
                 recs = [handle_barcode(res, color, depth, products, log, now, mode, facit, stats, meta, args.filter)
                         for res in results]
-                session.on_frame(now, recs)   # röstvägledning och länk (ändring 29-31), även utan läsning
+                session.on_frame(now, recs, seen)   # röstvägledning och länk (ändring 29-31, 37), även utan läsning
                 if now - started >= WARMUP_S:
                     stats["right_frames_kept"] += any(r.get("correct") and "tunn" not in r["filter"] for r in recs)
                     stats["tries"] += 1
