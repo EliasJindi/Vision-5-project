@@ -8,6 +8,7 @@
 #   python3 tools/streckkod.py              (4K, 30 s)
 #   python3 tools/streckkod.py --sekunder 45 --skala 0.5   (detektorn på halv upplösning: snabbare?)
 #   clear && sleep 15 && python3 tools/streckkod.py      (15 s att ställa sig först). Ctrl+C avslutar och sammanfattar.
+# Mosaiken tar alltid med bilderna där detektorn eller zxing hittade något (7/11: de kom annars inte med).
 # Vrid varan under tiden: koden synlig ibland, bortvänd ibland, så syns både träffar och falsklarm.
 # =========================================================================
 import argparse
@@ -26,6 +27,21 @@ def quads(result, dx=0, dy=0, scale=1.0):
     if not ok or points is None:
         return []
     return [[(float(x) / scale + dx, float(y) / scale + dy) for x, y in quad] for quad in points]
+
+
+def pick_tiles(flags, n=16):
+    """
+    Vilka bilder som kommer med i mosaiken (index i tidsordning). Alla där detektorn eller zxing
+    hittade något kommer med först (det är dem vi vill granska), resten fylls jämnt utspritt.
+    flags: [bool] per bild, sant om något hittades.
+    """
+    hits = [i for i, f in enumerate(flags) if f][:n]
+    rest = [i for i, f in enumerate(flags) if not f]
+    room = n - len(hits)
+    if room > 0 and rest:
+        k = min(room, len(rest))
+        hits += [rest[round(j * (len(rest) - 1) / max(1, k - 1))] for j in range(k)]
+    return sorted(set(hits))
 
 
 def summarize(rows):
@@ -89,7 +105,7 @@ def main():
                     ms.append((time.perf_counter() - t) * 1000)
                 results, _ = bs.decode_frame(color, crop)
                 rows.append((region is not None, bool(found), bool(results)))
-                if now - t0 >= 3 and len(tiles) < 60:            # efter uppstarten, högst 60 bilder
+                if now - t0 >= 3 and len(tiles) < 200:           # efter uppstarten, högst 200 bilder
                     img = color.copy()
                     if region is not None:
                         rx, ry, rw, rh = region.to_pixels(img.shape[1], img.shape[0])
@@ -99,12 +115,12 @@ def main():
                     text = f"{'hand' if region else 'ingen hand'} | detektor: {'JA' if found else 'nej'} | last: {'JA' if results else 'nej'}"
                     tile = cv2.resize(img, (TILE_W, TILE_H))
                     cv2.putText(tile, text, (8, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
-                    tiles.append(tile)
+                    tiles.append((tile, bool(found or results)))
                     print(f"  {now - t0:5.1f} s  {text}")
         except KeyboardInterrupt:
             print("\nAvbruten: sammanfattar det som hann samlas in.")
     stats = summarize(rows)
-    picked = [tiles[round(i * (len(tiles) - 1) / max(1, min(16, len(tiles)) - 1))] for i in range(min(16, len(tiles)))]
+    picked = [tiles[i][0] for i in pick_tiles([hit for _, hit in tiles])]   # bilder med fynd först
     while picked and len(picked) % 4:
         picked.append(np.zeros((TILE_H, TILE_W, 3), np.uint8))
     if picked:
