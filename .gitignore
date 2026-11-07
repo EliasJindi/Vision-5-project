@@ -11,3 +11,6 @@ piper/
 logs/
 *.jpg
 cache/
+
+# Oanvänt: gamla bilder, utskrifter och filer. Ska aldrig upp på GitHub (repot är publikt).
+ej_anvant/

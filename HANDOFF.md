@@ -25,7 +25,7 @@ Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätseri
 - **Elias tar emot kodgranskning av andras kod** (ofta skriven av en annan AI-agent). Elias har gett tillåtelse att ändra kod om du tycker den är dålig, så länge du säger vad du ändrat och förklarar felet.
 - **Måttband i tum.** Elias mäter i tum. Räkna om (tum × 2,54 = cm) i alla instruktioner.
 - **Skriv inte i HANDOFF.md på eget initiativ** (Elias, 17/10). Uppdatera när Elias ber om det.
-- **Arbetsloggar som PDF** efter testdagar ska läggas i `docs/` och listas i avsnitt 11, **nyaste överst** (Elias, 27 och 29/10). Aldrig foton från rummet, koordinater eller butiksnamn i dem: repot är publikt.
+- **Arbetsloggar som PDF** efter testdagar ska läggas i `docs/rapporter/` och listas i avsnitt 11, **nyaste överst** (Elias, 27 och 29/10). Aldrig foton från rummet, koordinater eller butiksnamn i dem: repot är publikt.
 - **Checklistor med numrerade steg (☐ 0, 1, 2 …)** fungerar bra för Elias när tester ska köras.
 
 ### Säkerhetsregler (hårda)
@@ -77,8 +77,8 @@ Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätseri
 | `tools/` | Hjälpverktyg som överlever omstart: `usb_hastighet.py`, `sikte.py` (en bild till `logs/sikte.jpg`), `mosaik.py` (16 `--diag`-bilder från senaste körningen), `narmast.py` (ruta runt handen). Körs från `~/ai_glasses` |
 | `voice_guidance/` | **Röstvägledning** (3–5/11): `engine.py` (beslutslogik), `voice.py` (inkl. pip), `basket.py` (korgen), `catalog.py` (namn och `info`), `link.py` (JSON-länk för t.ex. C#), `session.py`, `replay.py`. Se `docs/ROSTVAGLEDNING.md` |
 | `tests/` | 200 enhetstester: `python3 -m unittest discover -s tests -t .` |
-| `docs/` | Arbetsloggar (PDF) och `ROSTVAGLEDNING.md`. Se avsnitt 11 |
-| `test_cam.py` | Gammal kameratest |
+| `docs/` | `ROSTVAGLEDNING.md`. Arbetsloggarna (PDF) ligger i `docs/rapporter/`, se avsnitt 11 |
+| `ej_anvant/` | Gammalt som inte används (t.ex. `test_cam.py`, en gammal kameratest). Mappen är i `.gitignore`: bilder och utskrifter som läggs där når aldrig GitHub |
 
 **Inte i repot (finns bara på Pi:n):** `kartor/produkter.geojson`, `kartor/mobler.geojson`, `.env`, `logs/`, `cache/`, Piper-modellen.
 
@@ -194,7 +194,7 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 ## 5. Strömmen
 
 - Powerbanken ger 15 W. Pi 5 vill ha 25 W (och ger bara 600 mA till USB utan 5 A-strömförsörjning). Rumstestet fungerar ändå, men håll koll på `throttled` efter varje körning (`vcgencmd get_throttled`; `0x0` = ingen underspänning sedan start).
-- **5/11: Y-adaptern var trasig.** Med den kraschade kameran efter 10–30 s (`error -71`, "Maybe the USB cable is bad?" i `dmesg`), även med nätadapter och gammal kod. Utan den, på nätadaptern: ingen krasch, 5,07–5,12 V, `throttled=0x0`. Kameran drar nu ström genom Pi:n, som har `usb_max_current_enable=1` (full USB-ström). **På powerbanken utan Y-adapter är det inte prövat.** Detaljer: `docs/Vision5_rostvagledning_pa_pi_2026-11-05.pdf`.
+- **5/11: Y-adaptern var trasig.** Med den kraschade kameran efter 10–30 s (`error -71`, "Maybe the USB cable is bad?" i `dmesg`), även med nätadapter och gammal kod. Utan den, på nätadaptern: ingen krasch, 5,07–5,12 V, `throttled=0x0`. Kameran drar nu ström genom Pi:n, som har `usb_max_current_enable=1` (full USB-ström). **På powerbanken utan Y-adapter är det inte prövat.** Detaljer: `docs/rapporter/Vision5_rostvagledning_pa_pi_2026-11-05.pdf`.
 - **Elias har beställt Waveshare UPS HAT (E) för Pi 5 (5 V/6 A, 30 W, pogo-pins under Pi:n), leverans 18–23/11 (5/11).** Batterierna (4 × 21700) ingår **inte** och ska köpas separat: skyddade celler av samma modell från ett känt märke, kontrollera celltypen i Waveshares wiki. Med kortet behövs ingen Y-adapter. Vikt ca 400 g med celler (beräknat): ryggsäck eller bälte, inte headset. Drifttid ca 4–5 h (beräknat, 10–15 W). Ett annat UPS-kort med bara 5 V/2,5 A (12,5 W) valdes bort: för svagt, powerbanken på 15 W har redan gett strömproblem.
   - **Tills dess:** nätadaptern, kameran direkt i Pi:n, utan Y-adapter. Powerbanken utan Y-adapter är inte prövad.
   - **När kortet kommit:** sätt i cellerna, kör skannern med `--vagledning tal` i 2 minuter, mät spänningen (`while true; do vcgencmd pmic_read_adc EXT5V_V; vcgencmd get_throttled; sleep 1; done`) och läs `dmesg`. Kontrollera `vcgencmd get_config usb_max_current_enable` (ska vara 1: Pi:n ser inte vad kortet klarar). Pi:ns hölje och kylare kan behöva bytas: kortet sitter under Pi:n. Kortet kan rapportera batterinivån via I2C (idé: rösten säger "batteriet är lågt"), inte byggt.
@@ -206,7 +206,7 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 
 ## 6. Läget just nu och vad som väntar på Pi:n
 
-**Pi:n är på `main` med PR #11 (27/10).** Fokustestet är gjort (18 och 20/10) och filtren är testade på Pi:n (27/10). Detaljer och alla körningar i PDF:erna i `docs/` (avsnitt 11). Det viktigaste:
+**Pi:n är på `main` med PR #11 (27/10).** Fokustestet är gjort (18 och 20/10) och filtren är testade på Pi:n (27/10). Detaljer och alla körningar i PDF:erna i `docs/rapporter/` (avsnitt 11). Det viktigaste:
 
 | Fynd | Status |
 |---|---|
@@ -237,7 +237,7 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 | 4K gav 3,4 px/modul på 0,29 m, 1080p 3,6 på 0,27 m. 4K borde ge ungefär det dubbla | Uppmätt, inte förklarat |
 | `--fokusruta` | Inte prövad på kameran |
 
-**Kameran, siktet och handen (6–7/11), uppmätt.** Detaljer: `docs/Vision5_handen_och_fokus_2026-11-07.pdf`.
+**Kameran, siktet och handen (6–7/11), uppmätt.** Detaljer: `docs/rapporter/Vision5_handen_och_fokus_2026-11-07.pdf`.
 
 | Fynd | Status |
 |---|---|
@@ -260,14 +260,14 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 
 **Tidsram (2026-10-17):** exjobbet börjar först nästa termin, så det finns ingen deadline att stressa mot. En person kommer då att hjälpa Elias med koden. Prioritera därför att det som byggs nu är **förstått, repeterbart och dokumenterat** framför att hinna med många funktioner. Ordningen nedan reviderades efter en genomgång samma dag: punkt 2 är ny, positionstestet är flyttat fram och vinkel och djupkontroll är sammanslagna i punkt 5. Kodändringar föreslås först och görs när Elias säger ja.
 
-**Status 7/11: fokus på handen fungerar (PR #31–#37).** `--hand` ställer linsen efter handens avstånd och gav ungefär tre gånger så många läsningar. Arbetslogg: `docs/Vision5_handen_och_fokus_2026-11-07.pdf`. **Nästa steg, i ordning:**
+**Status 7/11: fokus på handen fungerar (PR #31–#37).** `--hand` ställer linsen efter handens avstånd och gav ungefär tre gånger så många läsningar. Arbetslogg: `docs/rapporter/Vision5_handen_och_fokus_2026-11-07.pdf`. **Nästa steg, i ordning:**
 1. Fler rundor med och utan `--hand`, fler varor (burk, blank påse, liten kod), blundande test. Kör alltid `python3 tools/usb_hastighet.py` först.
 2. **Handmodell** som bekräftar att det närmaste är en hand (MediaPipe, helst på kamerans processor; kontrollera att den ryms och passar DepthAI 2.29). Sedan kan rösten guida efter handen även utan kod ("Lyft varan lite.").
 3. Hållare med fast vinkel ca 20° nedåt (CAD-fil), vinklad USB 3-sladd. Batterikortet kommer 18–23/11 (avsnitt 5).
 4. **Väntar på Elias beslut:** ny fras i stället för "en halv armlängd" (förslag: "Böj armen och håll varan framför dig."). **Avgjort 7/11:** `--hand` är standard (ändring 36, `--utan-hand` stänger av); tipsen efter "Håll stilla." behåller sin takt (efter 8 s har användaren ändå rört sig); två läsningar krävs (en gav 4 fel namn); "Finns redan i korgen." vid återvisning är rätt (Elias testade det med flit).
 5. Butikstester när ICA ger tillstånd.
 
-**Status 5/11: röstvägledningen är körd och fungerar på Pi:n (PR #19–#28).** Vad som ändrats, vad som är uppmätt och vad som är osäkert: `docs/Vision5_rostvagledning_pa_pi_2026-11-05.pdf`. **Nästa steg, i ordning:**
+**Status 5/11: röstvägledningen är körd och fungerar på Pi:n (PR #19–#28).** Vad som ändrats, vad som är uppmätt och vad som är osäkert: `docs/rapporter/Vision5_rostvagledning_pa_pi_2026-11-05.pdf`. **Nästa steg, i ordning:**
 1. Kameran utan Y-adapter, nätadaptern, bra ljus. `git pull && sync`, `python3 tts_engine.py --prewarm`.
 2. `lsusb -t` med kameran i en blå port: USB3 utan Y-adaptern?
 3. A/B 60 s utan och med `--fokusruta` (samma ljus och avstånd), jämför andelen bildrutor med kod. Läsfrekvensen (1–7 %) är det största problemet nu.
@@ -276,7 +276,7 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 6. **Förslag som väntar på Elias beslut:** avståndsvägledning med djupkameran ("Närmare"/"Längre bort" även utan kod), "Bra, håll stilla." när koden skymtar, OpenCV-detektorn för pip och riktning (B, mät först), CAD-fil till ett 3D-utskrivet headset. **Avböjt:** låst fokus som standard (användaren kan hålla varan på helt andra avstånd) och kvartsvarv i tipsen.
 7. Butikstester när ICA ger tillstånd.
 
-**Status 3/11: röstvägledningen är byggd (PR #16) men inte körd på Pi:n.** Paketet `voice_guidance/`, `--vagledning text|tal`, `--sikte huvud|hand`, `--lank PORT` och 99 enhetstester. Regler, protokoll och kända begränsningar: `docs/ROSTVAGLEDNING.md`. Arbetslogg: `docs/Vision5_rostvagledning_2026-11-03.pdf`. **Nästa steg, i ordning:**
+**Status 3/11: röstvägledningen är byggd (PR #16) men inte körd på Pi:n.** Paketet `voice_guidance/`, `--vagledning text|tal`, `--sikte huvud|hand`, `--lank PORT` och 99 enhetstester. Regler, protokoll och kända begränsningar: `docs/ROSTVAGLEDNING.md`. Arbetslogg: `docs/rapporter/Vision5_rostvagledning_2026-11-03.pdf`. **Nästa steg, i ordning:**
 1. **`python3 -m voice_guidance.replay logs/scan_*.jsonl --karta kartor/produkter.geojson`** på Pi:n. Visar vad motorn hade sagt under alla gamla körningar och **hur ofta den hade sagt fel vara** (ska vara 0, annars justeras reglerna innan något testas med röst). Skicka utskriften till Claude.
 2. `python3 tts_engine.py --prewarm` (utan kameran igång), sedan `--vagledning text` och sist `--vagledning tal`. Lyssna om beskeden stämmer med det som händer.
 3. **Justera trösklarna** (`GuidanceConfig`), särskilt `conflict_radius` (0,10, gissad: grannvaror på en hylla kan räknas som konflikt) och riktningskonventionen.
@@ -287,7 +287,7 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 
 **Status 29/10:** varutester gjorda för tomatpuré, kaffefilter och Coca-Cola (EAN-8) i 4K, se avsnitt 6 och de två PDF:erna från 29/10. Del 2 rättar flera slutsatser från del 1. EAN-8 inlagt (PR #14). Röstvägledningen föreslogs här och byggdes 3/11 (se ovan). Resultaten gäller bästa fall (kameran rätt riktad).
 
-**Status 27/10:** punkt 1 (fokustestet) är gjord. Del A av kodförslaget (`docs/Vision5_forslag_kodandring_2026-10-20.pdf`) är genomförd i PR #11: höjd- och djupfilter som loggas och avvisar med `--filter`, `scan_filters.py`, `analyze_scans.py`. Ändrat efter granskning: vid orimligt eller saknat djup sägs varan utan position. Punkt 2–5 nedan är inte påbörjade. **Ny ordning härifrån:**
+**Status 27/10:** punkt 1 (fokustestet) är gjord. Del A av kodförslaget (`docs/rapporter/Vision5_forslag_kodandring_2026-10-20.pdf`) är genomförd i PR #11: höjd- och djupfilter som loggas och avvisar med `--filter`, `scan_filters.py`, `analyze_scans.py`. Ändrat efter granskning: vid orimligt eller saknat djup sägs varan utan position. Punkt 2–5 nedan är inte påbörjade. **Ny ordning härifrån:**
 1. **Beslut: ska en tunn läsning ge "lite närmare" i stället för tystnad?** *Varför:* höjdfiltret stoppar allt nära pixelgränsen, även rätta läsningar. Som signal behålls säkerheten utan att räckvidden går förlorad, och det är första biten av röstvägledningen. Förslag, inte beslutat.
 2. **Testa en vara med kort streckkod.** *Varför:* hela men korta koder (höjd/bredd ~0,1) avvisas av höjdfiltret. Inte testat.
 3. **Fokuslås vid träff (B1 i kodförslaget).** Lås på medianen av några läsningar, släpp efter ~1,5 s utan träff, och låt aldrig låset ligga kvar (hinderdetekteringen behöver fokus långt bort). *Varför:* fönstret flyttas med avstånd och vinkel.
@@ -410,21 +410,21 @@ Elias hämtar bilder genom att högerklicka i VS Code och välja **Download**. S
 
 ---
 
-## 11. Arbetsloggar (PDF i `docs/`)
+## 11. Arbetsloggar (PDF i `docs/rapporter/`)
 
 Nyaste överst.
 
 | Fil | Innehåll |
 |---|---|
-| `docs/Vision5_handen_och_fokus_2026-11-07.pdf` | 6–7/11: USB 3 och kontakten, kamerans vinkel (mosaikerna), "Sakta närmare."/"Håll stilla.", en läsning gav 4 fel namn, linstabellen, `--hand` 13–15 % mot 4 %, vad som är osäkert, nästa steg |
-| `docs/Vision5_rostvagledning_pa_pi_2026-11-05.pdf` | Röstvägledningen på Pi:n 4–5/11: vad som hände i varje prov, felsökningen av kamerakrascherna (Y-adaptern), ändringarna PR #19–#28, vad som är osäkert, nästa steg |
-| `docs/Vision5_rostvagledning_2026-11-03.pdf` | Arbetslogg 3/11: vad som byggdes och varför, arkitekturen, hur det är testat (99 tester, mutationskontroll), vad som inte är testat, nästa steg |
-| `docs/Vision5_varutest_del2_2026-10-29.pdf` | Varutest del 2 (4K): Coca-Cola med EAN-8 läser till 0,71 m, kaffefiltret rakt och stabilt ger inga fel. **Rättar flera slutsatser i del 1** |
-| `docs/Vision5_varutest_kaffefilter_2026-10-29.pdf` | Varutest del 1 (4K): kaffefilter med 22 felläsningar i en lutande, instabil uppställning, förslag på konfliktregel. Läs med rättelserna i del 2 |
-| `docs/Vision5_filter_pa_pi_2026-10-27.pdf` | Filtren på Pi:n: höjden mäter osäkerhet, inte rätt/fel; djupet fel bara första sekunden; hälften av bilderna når Pi:n |
-| `docs/Vision5_forslag_kodandring_2026-10-20.pdf` | Kodförslaget (del A filter, del B fokusstyrning) med testplan. Del A genomförd i PR #11, med ändringen att varan sägs utan position vid orimligt djup |
-| `docs/Vision5_autofokus_hojdfilter_2026-10-20.pdf` | Autofokus och kodens placering (mitten 100 %, längst ner 0 %), lins 77 vid kanten, höjdfiltret på alla loggar |
-| `docs/Vision5_fokustest_2026-10-18.pdf` | Fokustestet: 19 körningar, linsfönster per avstånd, fast lins mot autofokus, första felaktiga djupet, första tunna felläsningen. USB-raden rättad 20/10 |
+| `docs/rapporter/Vision5_handen_och_fokus_2026-11-07.pdf` | 6–7/11: USB 3 och kontakten, kamerans vinkel (mosaikerna), "Sakta närmare."/"Håll stilla.", en läsning gav 4 fel namn, linstabellen, `--hand` 13–15 % mot 4 %, vad som är osäkert, nästa steg |
+| `docs/rapporter/Vision5_rostvagledning_pa_pi_2026-11-05.pdf` | Röstvägledningen på Pi:n 4–5/11: vad som hände i varje prov, felsökningen av kamerakrascherna (Y-adaptern), ändringarna PR #19–#28, vad som är osäkert, nästa steg |
+| `docs/rapporter/Vision5_rostvagledning_2026-11-03.pdf` | Arbetslogg 3/11: vad som byggdes och varför, arkitekturen, hur det är testat (99 tester, mutationskontroll), vad som inte är testat, nästa steg |
+| `docs/rapporter/Vision5_varutest_del2_2026-10-29.pdf` | Varutest del 2 (4K): Coca-Cola med EAN-8 läser till 0,71 m, kaffefiltret rakt och stabilt ger inga fel. **Rättar flera slutsatser i del 1** |
+| `docs/rapporter/Vision5_varutest_kaffefilter_2026-10-29.pdf` | Varutest del 1 (4K): kaffefilter med 22 felläsningar i en lutande, instabil uppställning, förslag på konfliktregel. Läs med rättelserna i del 2 |
+| `docs/rapporter/Vision5_filter_pa_pi_2026-10-27.pdf` | Filtren på Pi:n: höjden mäter osäkerhet, inte rätt/fel; djupet fel bara första sekunden; hälften av bilderna når Pi:n |
+| `docs/rapporter/Vision5_forslag_kodandring_2026-10-20.pdf` | Kodförslaget (del A filter, del B fokusstyrning) med testplan. Del A genomförd i PR #11, med ändringen att varan sägs utan position vid orimligt djup |
+| `docs/rapporter/Vision5_autofokus_hojdfilter_2026-10-20.pdf` | Autofokus och kodens placering (mitten 100 %, längst ner 0 %), lins 77 vid kanten, höjdfiltret på alla loggar |
+| `docs/rapporter/Vision5_fokustest_2026-10-18.pdf` | Fokustestet: 19 körningar, linsfönster per avstånd, fast lins mot autofokus, första felaktiga djupet, första tunna felläsningen. USB-raden rättad 20/10 |
 
 **Referens, inte en arbetslogg:** `docs/ROSTVAGLEDNING.md`. Röstvägledningens regler, trösklar, länkprotokollet (JSON-rader, kommandot `say`) och kända begränsningar. Läs den före `voice_guidance/`
 
