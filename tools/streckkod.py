@@ -68,6 +68,31 @@ def summarize(rows):
     }
 
 
+def report(rows, tiles, rescued_codes, ms, skala):
+    """Sammanfattning och mosaik. Anropas innan kameran stängs (7/11: Ctrl+C under stängningen gav inget)."""
+    import cv2
+    import numpy as np
+    os.makedirs("logs", exist_ok=True)
+    stats = summarize(rows)
+    picked = [tiles[i][0] for i in pick_tiles([hit for _, hit in tiles])]   # bilder med fynd först
+    while picked and len(picked) % 4:
+        picked.append(np.zeros((TILE_H, TILE_W, 3), np.uint8))
+    if picked:
+        cv2.imwrite("logs/streckkod.jpg", np.vstack([np.hstack(picked[i:i + 4]) for i in range(0, len(picked), 4)]),
+                    [cv2.IMWRITE_JPEG_QUALITY, 85])
+    print(f"\nKlart: logs/streckkod.jpg. {stats['bilder']} bilder, handen i {stats['med_hand']}.")
+    print(f"  Detektorn såg en kod i {stats['upptackt']} av dem, zxing läste en kod i {stats['last']}.")
+    print(f"  Sedd men inte läst (då skulle rösten säga \"håll stilla\"): {stats['upptackt_ej_last']}")
+    print(f"  Läst men inte sedd (detektorn missade): {stats['last_ej_upptackt']}")
+    print(f"  Räddade med zoom (utskuren kod, 2 gånger större): {stats['raddade']} av {stats['upptackt_ej_last']}")
+    if rescued_codes:
+        counts = {c: rescued_codes.count(c) for c in sorted(set(rescued_codes))}
+        print("  Koder som zoomen läste: " + ", ".join(f"{c} ({n})" for c, n in counts.items())
+              + "  <- kontrollera att det är varans riktiga kod")
+    if ms:
+        print(f"  Detektorn: median {sorted(ms)[len(ms) // 2]:.0f} ms per bild (max {max(ms):.0f} ms), skala {skala}")
+
+
 def main():
     import cv2
     import depthai as dai
@@ -87,75 +112,65 @@ def main():
     os.makedirs("logs", exist_ok=True)
     rows, ms, tiles, rescued_codes = [], [], [], []
     print("Startar kameran. Håll fram varan och vrid den: koden synlig ibland, bortvänd ibland.")
-    with dai.Device(bs.build_pipeline(uhd=not args.hd, hand=True)) as device:
-        q = device.getOutputQueue(name="out", maxSize=4, blocking=False)
-        control = device.getInputQueue("control")
-        focus = HandFocus()
-        t0 = last = time.time()
-        try:
-            while time.time() - t0 < args.sekunder:
-                msg = q.get()
-                now = time.time()
-                if now - last < 0.5:                          # samma takt som skannern i 4K
-                    continue
-                last = now
-                color, depth = msg["color"].getCvFrame(), msg["depth"].getFrame()
-                region = find_near_region(depth)
-                command = focus.update(now, region)
-                if command is not None:
-                    bs.send_focus(control, command, color.shape[1], color.shape[0])
-                crop = focus.crop(now)
-                found = []
-                if crop is not None:
-                    x, y, w, h = crop.to_pixels(color.shape[1], color.shape[0])
-                    part = color[y:y + h, x:x + w]
-                    if args.skala < 1.0:
-                        part = cv2.resize(part, None, fx=args.skala, fy=args.skala)
-                    t = time.perf_counter()
-                    found = quads(detector.detect(part), x, y, args.skala)
-                    ms.append((time.perf_counter() - t) * 1000)
-                results, _ = bs.decode_frame(color, crop)
-                saved = []
-                if found and not results:                    # zoom: skär ut koden, förstora, läs igen
-                    for qd in found:
-                        x0, y0, x1, y1 = zoom_box(qd, color.shape[1], color.shape[0])
-                        big = cv2.resize(color[y0:y1, x0:x1], None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-                        saved += [r.text for r in bs.zxingcpp.read_barcodes(big, formats=bs.BARCODE_FORMATS)]
-                rescued_codes += saved
-                rows.append((region is not None, bool(found), bool(results), bool(saved)))
-                if now - t0 >= 3 and len(tiles) < 200:           # efter uppstarten, högst 200 bilder
-                    img = color.copy()
-                    if region is not None:
-                        rx, ry, rw, rh = region.to_pixels(img.shape[1], img.shape[0])
-                        cv2.rectangle(img, (rx, ry), (rx + rw, ry + rh), (255, 128, 0), 8)
-                    for qd in found:
-                        cv2.polylines(img, [np.array(qd, np.int32)], True, (0, 255, 255), 8)
-                    text = (f"{'hand' if region else 'ingen hand'} | detektor: {'JA' if found else 'nej'} | "
-                            f"last: {'JA' if results else 'nej'}{' | zoom: JA' if saved else ''}")
-                    tile = cv2.resize(img, (TILE_W, TILE_H))
-                    cv2.putText(tile, text, (8, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
-                    tiles.append((tile, bool(found or results or saved)))
-                    print(f"  {now - t0:5.1f} s  {text}")
-        except KeyboardInterrupt:
-            print("\nAvbruten: sammanfattar det som hann samlas in.")
-    stats = summarize(rows)
-    picked = [tiles[i][0] for i in pick_tiles([hit for _, hit in tiles])]   # bilder med fynd först
-    while picked and len(picked) % 4:
-        picked.append(np.zeros((TILE_H, TILE_W, 3), np.uint8))
-    if picked:
-        cv2.imwrite("logs/streckkod.jpg", np.vstack([np.hstack(picked[i:i + 4]) for i in range(0, len(picked), 4)]),
-                    [cv2.IMWRITE_JPEG_QUALITY, 85])
-    print(f"\nKlart: logs/streckkod.jpg. {stats['bilder']} bilder, handen i {stats['med_hand']}.")
-    print(f"  Detektorn såg en kod i {stats['upptackt']} av dem, zxing läste en kod i {stats['last']}.")
-    print(f"  Sedd men inte läst (då skulle rösten säga \"håll stilla\"): {stats['upptackt_ej_last']}")
-    print(f"  Läst men inte sedd (detektorn missade): {stats['last_ej_upptackt']}")
-    print(f"  Räddade med zoom (utskuren kod, 2 gånger större): {stats['raddade']} av {stats['upptackt_ej_last']}")
-    if rescued_codes:
-        counts = {c: rescued_codes.count(c) for c in sorted(set(rescued_codes))}
-        print("  Koder som zoomen läste: " + ", ".join(f"{c} ({n})" for c, n in counts.items())
-              + "  <- kontrollera att det är varans riktiga kod")
-    if ms:
-        print(f"  Detektorn: median {sorted(ms)[len(ms) // 2]:.0f} ms per bild (max {max(ms):.0f} ms), skala {args.skala}")
+    reported = False
+    try:
+        with dai.Device(bs.build_pipeline(uhd=not args.hd, hand=True)) as device:
+            q = device.getOutputQueue(name="out", maxSize=4, blocking=False)
+            control = device.getInputQueue("control")
+            focus = HandFocus()
+            t0 = last = time.time()
+            try:
+                while time.time() - t0 < args.sekunder:
+                    msg = q.get()
+                    now = time.time()
+                    if now - last < 0.5:                          # samma takt som skannern i 4K
+                        continue
+                    last = now
+                    color, depth = msg["color"].getCvFrame(), msg["depth"].getFrame()
+                    region = find_near_region(depth)
+                    command = focus.update(now, region)
+                    if command is not None:
+                        bs.send_focus(control, command, color.shape[1], color.shape[0])
+                    crop = focus.crop(now)
+                    found = []
+                    if crop is not None:
+                        x, y, w, h = crop.to_pixels(color.shape[1], color.shape[0])
+                        part = color[y:y + h, x:x + w]
+                        if args.skala < 1.0:
+                            part = cv2.resize(part, None, fx=args.skala, fy=args.skala)
+                        t = time.perf_counter()
+                        found = quads(detector.detect(part), x, y, args.skala)
+                        ms.append((time.perf_counter() - t) * 1000)
+                    results, _ = bs.decode_frame(color, crop)
+                    saved = []
+                    if found and not results:                    # zoom: skär ut koden, förstora, läs igen
+                        for qd in found:
+                            x0, y0, x1, y1 = zoom_box(qd, color.shape[1], color.shape[0])
+                            big = cv2.resize(color[y0:y1, x0:x1], None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+                            saved += [r.text for r in bs.zxingcpp.read_barcodes(big, formats=bs.BARCODE_FORMATS)]
+                    rescued_codes += saved
+                    rows.append((region is not None, bool(found), bool(results), bool(saved)))
+                    if now - t0 >= 3 and len(tiles) < 200:           # efter uppstarten, högst 200 bilder
+                        img = color.copy()
+                        if region is not None:
+                            rx, ry, rw, rh = region.to_pixels(img.shape[1], img.shape[0])
+                            cv2.rectangle(img, (rx, ry), (rx + rw, ry + rh), (255, 128, 0), 8)
+                        for qd in found:
+                            cv2.polylines(img, [np.array(qd, np.int32)], True, (0, 255, 255), 8)
+                        text = (f"{'hand' if region else 'ingen hand'} | detektor: {'JA' if found else 'nej'} | "
+                                f"last: {'JA' if results else 'nej'}{' | zoom: JA' if saved else ''}")
+                        tile = cv2.resize(img, (TILE_W, TILE_H))
+                        cv2.putText(tile, text, (8, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
+                        tiles.append((tile, bool(found or results or saved)))
+                        print(f"  {now - t0:5.1f} s  {text}")
+            except KeyboardInterrupt:
+                print("\nAvbruten: sammanfattar det som hann samlas in.")
+            report(rows, tiles, rescued_codes, ms, args.skala)   # före stängningen, som kan ta några sekunder
+            reported = True
+            print("Stänger kameran …")
+    except KeyboardInterrupt:
+        if not reported:
+            report(rows, tiles, rescued_codes, ms, args.skala)
 
 
 if __name__ == "__main__":
