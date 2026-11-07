@@ -10,6 +10,9 @@
 #   ogiltig kontrollsiffra) vid olika px/modul. Underlag för om röstvägledningen ska säga "håll stilla"
 #   i stället för "lite närmare" när en osäker kod redan är stor nog. Samma definition av säker som
 #   rösten (voice_guidance.model.CodeRead). Utan flaggan är utskriften som förut.
+# 2026-11-07: --lins visar linsläget vid säkra läsningar per avstånd, och en anpassad kurva
+#   lins = a + b / avstånd. Underlag för att ställa fokus efter handens avstånd (--hand): provet 7/11
+#   visade att fokusrutan gav linsläge 26-37 (långt bort) trots att handen var på 0,3-0,5 m.
 # =========================================================================
 """
 analyze_scans.py - Utvärderar höjd- och djupfiltren på skannerloggarna.
@@ -19,6 +22,7 @@ Användning:
     python3 analyze_scans.py logs/scan_20261020_*.jsonl   # bara vissa loggar
     python3 analyze_scans.py --utan 20261017_140916       # utan körningar vars namn innehåller texten
     python3 analyze_scans.py --pixlar                     # säkra/osäkra läsningar per px/modul (röstvägledningen)
+    python3 analyze_scans.py --lins                       # linsläge vid säkra läsningar per avstånd (fokus på handen)
 """
 import argparse
 import glob
@@ -26,6 +30,8 @@ import json
 import os
 import statistics
 from collections import Counter
+
+import numpy as np
 
 from scan_filters import DEPTH_FACTOR, MIN_HEIGHT_RATIO, depth_plausible, expected_depth, size_from_corners
 
@@ -166,11 +172,71 @@ def pixel_report(logs):
                       f"vid minst T: {share} ({len(big)} st)")
 
 
+LENS_EDGES = (0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.60, 0.75)   # avståndsgrupper i meter
+
+
+def lens_samples(logs):
+    """[(avstånd_m, lins, loggnamn)] för säkra, rätta läsningar med rimligt djup."""
+    from voice_guidance.model import CodeRead
+    samples = []
+    for name, rows in logs.items():
+        for rec in rows:
+            d, lens = rec.get("distance_m"), rec.get("lins")
+            if not isinstance(d, (int, float)) or not isinstance(lens, int) or not 0.1 <= d <= 1.5:
+                continue
+            if "orimligt djup" in rec.get("filter", []) or rec.get("correct") is False:
+                continue
+            try:
+                if not CodeRead.from_record(rec).reliable:
+                    continue
+            except ValueError:
+                continue
+            samples.append((float(d), lens, name))
+    return samples
+
+
+def fit_lens(samples):
+    """Minsta kvadrat: lins = a + b / avstånd (linsen flyttas ungefär i proportion till 1/avstånd).
+    Returnerar (a, b, median absolut avvikelse) eller None om underlaget är för litet."""
+    if len({round(d, 2) for d, _, _ in samples}) < 3:
+        return None
+    x = np.array([1 / d for d, _, _ in samples])
+    y = np.array([lens for _, lens, _ in samples], dtype=float)
+    b, a = np.polyfit(x, y, 1)
+    return float(a), float(b), float(np.median(np.abs(y - (a + b * x))))
+
+
+def lens_report(logs):
+    samples = lens_samples(logs)
+    if not samples:
+        print("Inga säkra läsningar med både avstånd och linsläge i loggarna.")
+        return
+    print("Linsläge (0-255) vid säkra, rätta läsningar per avstånd. Högre = skarpt närmare.")
+    print(f"{len(samples)} läsningar från {len({n for *_, n in samples})} körningar.")
+    print(f"  {'avstånd':12s} {'antal':>6s} {'median':>7s} {'10-90 %':>10s} {'körningar':>10s}")
+    edges = (0.0,) + LENS_EDGES + (9.9,)
+    for lo, hi in zip(edges, edges[1:]):
+        group = [(lens, n) for d, lens, n in samples if lo <= d < hi]
+        if not group:
+            continue
+        lenses = [lens for lens, _ in group]
+        label = (f"under {hi:.2f}" if lo == 0.0 else f"minst {lo:.2f}" if hi == 9.9 else f"{lo:.2f}-{hi:.2f}")
+        print(f"  {label.replace('.', ','):12s} {len(group):6d} {statistics.median(lenses):7.0f} "
+              f"{quantile(lenses, 0.1):4d}-{quantile(lenses, 0.9):<5d} {len({n for _, n in group}):10d}")
+    fit = fit_lens(samples)
+    if fit:
+        a, b, err = fit
+        print(f"  Anpassning: lins = {comma(a, 1)} + {comma(b, 1)} / avstånd (median avvikelse {comma(err, 1)})")
+        print("  Det ger: " + ", ".join(f"{comma(d)} m -> {a + b / d:.0f}" for d in (0.25, 0.30, 0.35, 0.40, 0.50)))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Utvärderar höjd- och djupfiltren på skannerloggarna")
     ap.add_argument("loggar", nargs="*")
     ap.add_argument("--utan", action="append", default=[], metavar="TEXT",
                     help="hoppa över loggar vars namn innehåller TEXT (kan anges flera gånger)")
+    ap.add_argument("--lins", action="store_true",
+                    help="visa bara linsläge vid säkra läsningar per avstånd (underlag för fokus på handen)")
     ap.add_argument("--pixlar", action="store_true",
                     help="visa bara säkra/osäkra läsningar per px/modul (underlag för röstvägledningen)")
     args = ap.parse_args()
@@ -181,6 +247,9 @@ def main():
     logs = {os.path.basename(p): read_log(p) for p in paths}
     if args.pixlar:
         pixel_report(logs)
+        return
+    if args.lins:
+        lens_report(logs)
         return
 
     # --- Höjd ---

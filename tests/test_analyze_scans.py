@@ -86,5 +86,43 @@ class CommandLineTest(unittest.TestCase):
         self.assertNotIn("Orimligt djup", out)
 
 
+def lens_rec(d, lens, thin=False, correct=None, filt=None):
+    r = rec(3.0, thin=thin)
+    r.update(distance_m=d, lins=lens)
+    if correct is not None:
+        r["correct"] = correct
+    if filt is not None:
+        r["filter"] = filt
+    return r
+
+
+class LensTest(unittest.TestCase):
+    def test_only_reliable_correct_reads_with_plausible_depth_count(self):
+        samples = analyze_scans.lens_samples({"a_4k.jsonl": [
+            lens_rec(0.35, 80), lens_rec(0.35, 20, thin=True), lens_rec(0.35, 20, correct=False),
+            lens_rec(3.0, 20), lens_rec(0.35, 20, filt=["orimligt djup"]), {**lens_rec(0.35, 20), "lins": None}]})
+        self.assertEqual([(d, lens) for d, lens, _ in samples], [(0.35, 80)])
+
+    def test_the_fit_recovers_a_lens_that_follows_one_over_distance(self):
+        samples = [(d, round(20 + 20 / d), "a") for d in (0.25, 0.3, 0.35, 0.4, 0.5)]
+        a, b, err = analyze_scans.fit_lens(samples)
+        self.assertAlmostEqual(a, 20, delta=1.5)
+        self.assertAlmostEqual(b, 20, delta=0.5)
+        self.assertLess(err, 1)
+
+    def test_too_few_distances_give_no_fit(self):
+        self.assertIsNone(analyze_scans.fit_lens([(0.3, 80, "a"), (0.3, 81, "a"), (0.4, 75, "a")]))
+
+    def test_the_report_groups_by_distance(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            analyze_scans.lens_report({"a_4k.jsonl": [lens_rec(0.32, 80), lens_rec(0.33, 84), lens_rec(0.45, 70)],
+                                       "b_4k.jsonl": [lens_rec(0.26, 90)]})
+        text = out.getvalue()
+        self.assertIn("4 läsningar från 2 körningar", text)
+        self.assertIn("0,30-0,35", text)
+        self.assertIn("Anpassning: lins =", text)
+
+
 if __name__ == "__main__":
     unittest.main()
