@@ -264,7 +264,7 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 1. Fler rundor med och utan `--hand`, fler varor (burk, blank påse, liten kod), blundande test. Kör alltid `python3 tools/usb_hastighet.py` först.
 2. **Handmodell** som bekräftar att det närmaste är en hand (MediaPipe, helst på kamerans processor; kontrollera att den ryms och passar DepthAI 2.29). Sedan kan rösten guida efter handen även utan kod ("Lyft varan lite.").
 3. Hållare med fast vinkel ca 20° nedåt (CAD-fil), vinklad USB 3-sladd. Batterikortet kommer 18–23/11 (avsnitt 5).
-4. **Väntar på Elias beslut:** tipsen väntar 8 s efter "Håll stilla." (säger annars emot efter 3 s); ny fras i stället för "en halv armlängd"; `--hand` som standard i varuläget. **Avgjort:** två läsningar krävs (en gav 4 fel namn); "Finns redan i korgen." vid återvisning är rätt (Elias testade det med flit).
+4. **Väntar på Elias beslut:** ny fras i stället för "en halv armlängd" (förslag: "Böj armen och håll varan framför dig."). **Avgjort 7/11:** `--hand` är standard (ändring 36, `--utan-hand` stänger av); tipsen efter "Håll stilla." behåller sin takt (efter 8 s har användaren ändå rört sig); två läsningar krävs (en gav 4 fel namn); "Finns redan i korgen." vid återvisning är rätt (Elias testade det med flit).
 5. Butikstester när ICA ger tillstånd.
 
 **Status 5/11: röstvägledningen är körd och fungerar på Pi:n (PR #19–#28).** Vad som ändrats, vad som är uppmätt och vad som är osäkert: `docs/Vision5_rostvagledning_pa_pi_2026-11-05.pdf`. **Nästa steg, i ordning:**
@@ -364,8 +364,9 @@ python3 -m voice_guidance.replay logs/scan_*.jsonl --karta kartor/produkter.geoj
 python3 barcode_scanner.py --diag --4k --facit <EAN> --vagledning text   # röstvägledning, bara utskrift
 python3 barcode_scanner.py --diag --4k --facit <EAN> --vagledning tal --sikte huvud   # med röst (kör tts_engine.py --prewarm först)
 python3 tools/usb_hastighet.py                                  # USB 3 (SUPER)? Annars vänd USB-C-kontakten vid kameran
-clear && sleep 15 && python3 barcode_scanner.py --4k --hand --vagledning tal --sikte hand --filter --diag   # som i proven 7/11
-python3 tools/mosaik.py NAMN                                    # vad såg kameran? (NAMN mitten, eller NAMN 12:11:50 12:12:30)
+clear && sleep 15 && python3 barcode_scanner.py --4k --vagledning tal --sikte hand --filter --diag   # handläget är standard (--utan-hand stänger av)
+python3 tools/mosaik.py NAMN                                    # vad såg kameran? (NAMN mitten, NAMN 12:11:50 12:12:30)
+python3 tools/mosaik.py NAMN --senaste 4                        # en mosaik per körning (bilderna sparas per körning sedan 7/11)
 python3 tools/narmast.py --4k                                   # hittar den handen? 8 bilder till logs/narmast.jpg
 python3 tools/sikte.py                                          # en bild till logs/sikte.jpg: varan ska vara mitt i bild
 python3 analyze_scans.py --pixlar                               # säkra/osäkra läsningar per px/modul
@@ -382,7 +383,7 @@ Sammanställning av alla körningar görs med `analyze_scans.py`, som läser `lo
 
 **När Pi:n inte går att nå** (`Could not resolve hostname vision-pi1.local`): kontrollera att lampan lyser grönt (Pi 5 har en lampa: grön = igång, röd = avstängd), att datorn är på samma wifi, och leta efter Pi:n med `arp -a` i PowerShell efter en pingrunda över nätet (`foreach ($i in 1..254) { $null = ping -n 1 -w 200 "192.168.50.$i" }`). Raspberry Pi har fysiska adresser som börjar med 2c-cf-67, d8-3a-dd, dc-a6-32, e4-5f-01, 28-cd-c1 eller b8-27-eb. 27/10 hade Pi:n tappat wifi. Förebygg med `sudo nmcli connection modify "<wifi-namnet>" connection.autoconnect yes`.
 
-Elias hämtar bilder genom att högerklicka i VS Code och välja **Download**. Skriv `clear` före en körning så att bara den nya utskriften kopieras. Översiktsbilder görs med `python3 tools/mosaik.py NAMN` (bara den senaste körningen). Ta bilden **innan** bilderna rensas med `rm -f ~/ai_glasses/logs/snapshots/snap_*.jpg`.
+Elias hämtar bilder genom att högerklicka i VS Code och välja **Download**. Skriv `clear` före en körning så att bara den nya utskriften kopieras. Översiktsbilder görs med `python3 tools/mosaik.py NAMN` (senaste körningen) eller `--senaste N` / `--korning scan_…`. Sedan 7/11 sparar `--diag` bilderna i `logs/snapshots/<körning>/`, så ingenting behöver rensas före en körning. Ta bort gamla mappar då och då (`rm -r logs/snapshots/scan_202610*`): en 4K-körning kan ta 60–120 MB (uppskattat).
 
 **Test av skannern utan kamera:** föregående agent testade med en låtsas-kamera (en `Device`-klass som levererar syntetiska bilder) och syntetiska EAN-13-koder med känd modulstorlek (kodningstabellerna L/G/R och paritet är standard). Den koden ligger inte i repot. Skriv om den om du ändrar `barcode_scanner.py`, och kontrollera `px_per_modul` mot kända modulstorlekar. Obs: testkodernas streck måste vara tillräckligt höga för roterade koder, annars går de inte att avkoda.
 
