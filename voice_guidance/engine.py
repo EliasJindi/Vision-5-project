@@ -14,6 +14,9 @@ Reglerna, i prioritetsordning (se docs/ROSTVAGLEDNING.md):
      Har bara en säker läsning kommit och den andra dröjer: "håll stilla" (Elias 6/11: rör man sig då tappas koden).
   3. Annars, om koden syns men inte är säker: säg vart den ska (om den ligger i kanten, eftersom
      autofokus följer bildens mitt) eller "lite närmare".
+  3b. Ingen kod gick att läsa, men detektorn SER en streckkod (7/11, Elias: "vänd inte varan när den
+     faktiskt hittar en etikett"): ligger den i kanten säg vart, annars "håll stilla". Bara under en
+     sökning och när ingen vara är bekräftad. Detektorn kan aldrig bekräfta en vara.
   4. Syns ingen kod alls på ett tag: korta tips i tur och ordning ("håll varan framför dig, en halv armlängd
      bort", "vrid varan sakta", "vänd varan upp och ner"), först tätt och sedan glesare, utan slut tills en kod syns. Tystnad
      lämnade användaren ensam i en minut (Elias, 4-5/11).
@@ -27,6 +30,7 @@ oavbrutet. Inget pip under konflikt eller när varan redan är bekräftad.
 """
 from __future__ import annotations
 
+import math
 from collections import deque
 from dataclasses import dataclass
 from typing import Deque, Dict, List, Optional, Sequence, Set, Tuple
@@ -161,6 +165,8 @@ class GuidanceEngine:
         steady = self._steady_prompt(obs.t)
         if steady is not None:
             return steady
+        if not obs.reads and self._sees_new_code(obs):
+            return self._direction([p for p in obs.seen], ActionKind.STEADY)   # regel 3b
         if not obs.reads:
             return self._no_code_prompt(obs.t)
         if self._confirmed or any(r.reliable for r in obs.reads):
@@ -210,13 +216,21 @@ class GuidanceEngine:
 
     def _aim(self, reads: Sequence[CodeRead]) -> GuidanceAction:
         """Koden syns men är osäker. Ligger den i kanten: säg vart. Annars: närmare."""
-        target = min(reads, key=CodeRead.distance_from_center)
-        dx = target.center[0] - IMAGE_CENTER[0]
-        dy = target.center[1] - IMAGE_CENTER[1]
+        return self._direction([r.center for r in reads], ActionKind.CLOSER)
+
+    def _sees_new_code(self, obs: FrameObservation) -> bool:
+        """Detektorn ser en kod under en pågående sökning (inte efter en lyckad scanning)."""
+        return bool(obs.seen) and self._searching and not self._confirmed
+
+    def _direction(self, centers: Sequence[Point], centered: ActionKind) -> GuidanceAction:
+        """Riktning mot koden närmast mitten om den ligger utanför mittzonen, annars centered."""
+        target = min(centers, key=lambda c: math.dist(c, IMAGE_CENTER))
+        dx = target[0] - IMAGE_CENTER[0]
+        dy = target[1] - IMAGE_CENTER[1]
         excess_x = abs(dx) / self._cfg.deadzone_x
         excess_y = abs(dy) / self._cfg.deadzone_y
         if max(excess_x, excess_y) <= 1.0:
-            return GuidanceAction(ActionKind.CLOSER)
+            return GuidanceAction(centered)
         if excess_x >= excess_y:
             return GuidanceAction(ActionKind.CODE_LEFT if dx < 0 else ActionKind.CODE_RIGHT)
         return GuidanceAction(ActionKind.CODE_ABOVE if dy < 0 else ActionKind.CODE_BELOW)
@@ -258,8 +272,8 @@ class GuidanceEngine:
             self._no_code_said = 0
             self._searching = True
             self._ready_pending = False
-        if self._search_since is None or obs.reads:
-            self._search_since = obs.t
+        if self._search_since is None or obs.reads or self._sees_new_code(obs):
+            self._search_since = obs.t   # en kod som syns (läst eller bara sedd) betyder att sökningen går framåt
 
     def _just_scanned(self, ean: Optional[str]) -> bool:
         """Varan som precis skannades, innan en ny sökning börjat. Den ger varken tips eller "håll stilla"."""

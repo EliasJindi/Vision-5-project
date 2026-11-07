@@ -1,6 +1,6 @@
 import unittest
 
-from voice_guidance import (ActionKind, DictProductCatalog, EmptyProductCatalog, GuidanceAction,
+from voice_guidance import (ActionKind, DictProductCatalog, EmptyProductCatalog, FrameObservation, GuidanceAction,
                             GuidanceConfig, GuidanceEngine)
 
 from tests.helpers import EAN_A, EAN_B, frame, read
@@ -210,6 +210,57 @@ class SteadyTest(unittest.TestCase):
         engine = GuidanceEngine(EmptyProductCatalog())
         said = [engine.update(frame(t, read(thin=True))) for t in (0.0, 1.0, 2.0, 3.0)]
         self.assertNotIn(ActionKind.STEADY, kinds(said))
+
+
+def seen(t, *centers):
+    """En bildruta där detektorn ser koder (mitten 0-1) som inte gick att läsa."""
+    return FrameObservation(t, (), tuple(centers))
+
+
+class SeenCodeTest(unittest.TestCase):
+    """Regel 3b (7/11): detektorn ser koden men zxing kan inte läsa den. "Vänd inte varan" (Elias)."""
+
+    def test_a_seen_code_in_the_middle_asks_to_hold_still(self):
+        self.assertEqual(GuidanceEngine(CATALOG).update(seen(0.0, (0.5, 0.5))).kind, ActionKind.STEADY)
+
+    def test_a_seen_code_at_the_edge_gives_a_direction(self):
+        engine = GuidanceEngine(CATALOG)
+        self.assertEqual(engine.update(seen(0.0, (0.5, 0.95))).kind, ActionKind.CODE_BELOW)   # avskuren nertill
+        self.assertEqual(GuidanceEngine(CATALOG).update(seen(0.0, (0.05, 0.5))).kind, ActionKind.CODE_LEFT)
+
+    def test_the_seen_code_nearest_the_middle_decides(self):
+        action = GuidanceEngine(CATALOG).update(seen(0.0, (0.05, 0.5), (0.55, 0.5)))
+        self.assertEqual(action.kind, ActionKind.STEADY)
+
+    def test_a_seen_code_never_confirms_anything(self):
+        engine = GuidanceEngine(CATALOG)
+        kinds_said = kinds(engine.update(seen(t / 2, (0.5, 0.5))) for t in range(40))
+        self.assertNotIn(ActionKind.CONFIRMED, kinds_said)
+        self.assertNotIn(ActionKind.UNKNOWN_PRODUCT, kinds_said)
+
+    def test_while_a_code_is_seen_the_no_code_tips_wait(self):
+        engine = GuidanceEngine(CATALOG)
+        kinds_said = kinds(engine.update(seen(float(t), (0.5, 0.5))) for t in range(20))
+        self.assertNotIn(ActionKind.NO_CODE, kinds_said)
+        self.assertIn(ActionKind.STEADY, kinds_said)
+        self.assertIsNone(engine.update(frame(21.0)))                       # 2 s efter sista synen: vänta
+        self.assertEqual(engine.update(frame(23.0)).kind, ActionKind.NO_CODE)   # 4 s efter sista synen
+
+    def test_reads_take_precedence_over_what_the_detector_sees(self):
+        engine = GuidanceEngine(CATALOG)
+        obs = FrameObservation(0.0, (read(thin=True),), ((0.5, 0.5),))
+        self.assertEqual(engine.update(obs).kind, ActionKind.CLOSER)   # zxing läste en tunn remsa: som förut
+
+    def test_after_a_successful_scan_a_seen_code_is_ignored(self):
+        engine = GuidanceEngine(CATALOG)
+        engine.update(frame(0.0, read()))
+        engine.update(frame(0.5, read()))                                 # bekräftad
+        said = [(t, engine.update(seen(t, (0.5, 0.5)))) for t in (1.0, 3.0, 6.0, 9.0)]
+        self.assertTrue(all(a is None for _, a in said), said)            # inget "håll stilla" när varan läggs ned
+        self.assertEqual(engine.update(frame(16.0)).kind, ActionKind.READY)   # 15 s efter sista läsningen, som förut
+
+    def test_old_logs_without_detector_behave_as_before(self):
+        self.assertEqual(FrameObservation(0.0).seen, ())
 
 
 class ConflictTest(unittest.TestCase):

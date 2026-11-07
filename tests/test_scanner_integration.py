@@ -159,10 +159,11 @@ class ScannerMainTest(unittest.TestCase):
         with open(self.karta, "w", encoding="utf-8") as f:
             json.dump({"type": "FeatureCollection", "features": [feature]}, f)
 
-    def run_scanner(self, *flags, frames=6, ean=EAN_A, depth=None, center=(960, 540)):
+    def run_scanner(self, *flags, frames=6, ean=EAN_A, depth=None, center=(960, 540), blank=False):
         import barcode_scanner
         depth = np.full((720, 1280), 300, np.uint16) if depth is None else depth
-        message = {"color": FakeFrame(barcode_frame(ean, center=center)), "depth": FakeFrame(depth)}
+        color = np.full((1080, 1920, 3), 255, np.uint8) if blank else barcode_frame(ean, center=center)
+        message = {"color": FakeFrame(color), "depth": FakeFrame(depth)}
         fake_dai = types.SimpleNamespace(Device=lambda pipeline: FakeDevice(FakeQueue(message, frames)),
                                          UsbSpeed=types.SimpleNamespace(SUPER=1, SUPER_PLUS=2),
                                          CameraControl=FakeCameraControl)
@@ -314,6 +315,51 @@ class ScannerMainTest(unittest.TestCase):
                     barcode_scanner.send_focus(Queue(), command, 1920, 1080)
         self.assertEqual([c.calls[0][0] for c in sent], ["lens", "autofocus"])
         self.assertEqual(sent[1].calls[1], ("exposure", (0, 0, 1920, 1080)))   # ljuset över hela bilden igen
+
+    def test_a_code_the_detector_sees_but_cannot_be_read_gives_hold_still(self):
+        import barcode_scanner
+        detector = mock.Mock()
+        detector.detect.return_value = (True, [[(910, 520), (1010, 520), (1010, 560), (910, 560)]])   # mitt i bild
+        with mock.patch.object(barcode_scanner, "make_detector", return_value=detector):
+            out = self.run_scanner("--vagledning", "text", blank=True)
+        self.assertIn("Håll stilla.", out)
+        self.assertIn("sedd men inte läst i 6 bildrutor", out)
+        self.assertNotIn("(confirmed)", out)                             # detektorn bekräftar aldrig en vara
+
+    def test_a_seen_code_at_the_edge_gives_a_direction(self):
+        import barcode_scanner
+        detector = mock.Mock()
+        detector.detect.return_value = (True, [[(10, 10), (110, 10), (110, 50), (10, 50)]])   # uppe till vänster
+        with mock.patch.object(barcode_scanner, "make_detector", return_value=detector):
+            out = self.run_scanner("--vagledning", "text", blank=True)
+        self.assertIn("Lite åt vänster.", out)
+
+    def test_the_detector_is_not_run_when_the_code_is_read(self):
+        import barcode_scanner
+        detector = mock.Mock()
+        with mock.patch.object(barcode_scanner, "make_detector", return_value=detector):
+            self.run_scanner("--vagledning", "text")
+        detector.detect.assert_not_called()
+
+    def test_the_detector_is_not_used_without_hand_mode(self):
+        import barcode_scanner
+        with mock.patch.object(barcode_scanner, "make_detector") as make:
+            self.run_scanner("--utan-hand", blank=True)
+        make.assert_not_called()
+
+    def test_seen_codes_are_moved_to_the_whole_image(self):
+        import barcode_scanner
+        from hand_region import NearRegion
+        detector = mock.Mock()
+        detector.detect.return_value = (True, [[(0, 0), (100, 0), (100, 40), (0, 40)]])
+        crop = NearRegion(0.5, 0.5, 1.0, 1.0, 0.35, 0.25)                 # nedre högra fjärdedelen
+        centers = barcode_scanner.seen_codes(detector, np.zeros((1080, 1920, 3), np.uint8), crop)
+        self.assertEqual(len(centers), 1)
+        self.assertAlmostEqual(centers[0][0], (960 + 50) / 1920)
+        self.assertAlmostEqual(centers[0][1], (540 + 20) / 1080)
+        self.assertEqual(barcode_scanner.seen_codes(None, np.zeros((10, 10, 3), np.uint8), crop), [])
+        detector.detect.return_value = (False, None)
+        self.assertEqual(barcode_scanner.seen_codes(detector, np.zeros((1080, 1920, 3), np.uint8), crop), [])
 
     def test_hand_mode_cannot_be_combined_with_other_focus_flags(self):
         for flags in (("--hand", "--fokus", "70"), ("--hand", "--fokusruta")):

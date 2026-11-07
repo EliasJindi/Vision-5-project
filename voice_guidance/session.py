@@ -9,7 +9,7 @@ session.py - Binder ihop GuidanceEngine, GuidanceVoice och länken till andra pr
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence, Tuple
 
 from .basket import Basket
 from .catalog import DictProductCatalog
@@ -38,16 +38,18 @@ class GuidanceSession:
     def basket(self) -> Basket:
         return self._basket
 
-    def on_frame(self, t: float, records: Sequence[Mapping[str, Any]]) -> Optional[GuidanceAction]:
+    def on_frame(self, t: float, records: Sequence[Mapping[str, Any]],
+                 seen: Sequence[Tuple[float, float]] = ()) -> Optional[GuidanceAction]:
         """
         Anropas för varje avkodad bildruta, även när ingen kod syntes (records tom): motorn behöver
         tiden för att glömma gamla läsningar. records är loggraderna från handle_barcode().
+        seen: mitten (0-1) på koder som detektorn ser men som inte gick att läsa (regel 3b).
         """
         for rec in records:
             self._link.publish({**rec, "type": "read"})
         if self._engine is None:
             return None
-        action = self._engine.update(FrameObservation(t, self._reads(records)))
+        action = self._engine.update(FrameObservation(t, self._reads(records), tuple(seen)))
         if action is not None:
             # Bara kända varor läggs i korgen. "Okänd vara" kan vara en felläsning.
             in_basket = self._basket.add(action.ean, action.name) if action.kind is ActionKind.CONFIRMED else None
