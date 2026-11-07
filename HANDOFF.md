@@ -1,6 +1,6 @@
 # HANDOFF: Vision-5 (till nästa agent)
 
-Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätserien (avsnitt 3, 4, 6, 7 och 10). Avsnitt 7 reviderades därefter efter en genomgång med Elias (ny ordning, ingen deadlinepress). **Uppdaterad 2026-10-27** efter fokustesterna 18 och 20/10 och filtertestet 27/10 (avsnitt 0, 5, 6, 7, 9, 10 och nytt avsnitt 11 med arbetsloggarna som PDF i `docs/`). **Uppdaterad 2026-10-29** efter varutesterna (kaffefilter, Coca-Cola med EAN-8): avsnitt 3, 6, 7, 10 och 11. **Uppdaterad 2026-11-03** efter att röstvägledningen byggts (PR #16): avsnitt 1, 3, 7, 9, 10 och 11. **Uppdaterad 2026-11-05** efter de första proven med röst på Pi:n och felsökningen av kameran (Y-adaptern var trasig), PR #19–#28: avsnitt 0, 1, 3, 5, 6, 7, 9, 10 och 11. Läs hela filen innan du gör något. Den beskriver vad projektet är, vad som är gjort, hur säkra vi är på varje resultat, vad som är på gång och **varför**. Filen innehåller medvetet inga rumsmått, koordinater, foton eller personnamn: repot är publikt.
+Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätserien (avsnitt 3, 4, 6, 7 och 10). Avsnitt 7 reviderades därefter efter en genomgång med Elias (ny ordning, ingen deadlinepress). **Uppdaterad 2026-10-27** efter fokustesterna 18 och 20/10 och filtertestet 27/10 (avsnitt 0, 5, 6, 7, 9, 10 och nytt avsnitt 11 med arbetsloggarna som PDF i `docs/`). **Uppdaterad 2026-10-29** efter varutesterna (kaffefilter, Coca-Cola med EAN-8): avsnitt 3, 6, 7, 10 och 11. **Uppdaterad 2026-11-03** efter att röstvägledningen byggts (PR #16): avsnitt 1, 3, 7, 9, 10 och 11. **Uppdaterad 2026-11-05** efter de första proven med röst på Pi:n och felsökningen av kameran (Y-adaptern var trasig), PR #19–#28: avsnitt 0, 1, 3, 5, 6, 7, 9, 10 och 11. **Uppdaterad 2026-11-07** efter 6–7/11: USB 3 (kontaktens riktning), kamerans vinkel, "Sakta närmare."/"Håll stilla.", verktygen i `tools/` och fokus på handen (`--hand`), PR #31–#37: avsnitt 0, 1, 3, 6, 7, 9, 10 och 11. Läs hela filen innan du gör något. Den beskriver vad projektet är, vad som är gjort, hur säkra vi är på varje resultat, vad som är på gång och **varför**. Filen innehåller medvetet inga rumsmått, koordinater, foton eller personnamn: repot är publikt.
 
 ---
 
@@ -10,6 +10,8 @@ Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätseri
 - **Visionen byggs hel.** Elias vill inte ha en nedskuren version. Idéer som parkeras ska skrivas ned, inte ignoreras.
 - **Elias är student och kör testerna själv på en Raspberry Pi.** Du ser inte hårdvaran. Allt du vet kommer från det Elias klistrar in (terminalutskrifter, bilder). Be om utskrift, gissa inte.
 - **Ingen kodändring utan att Elias bett om den.** Föreslå först. Elias har uttryckligen sagt: "nej gör inte nya ändringar" när jag ändrade oombedd. När Elias säger "ja gör så" till ett konkret förslag är det klartecken för just det. **Igen 5/11:** "vad har du ändrat, du har inte sagt om du får ändra heller", efter att egna tillägg (korgens regler, "Redo för nästa vara") byggts och mergats utan fråga. Arbetssätt sedan dess: lägg fram ett konkret förslag (gärna en tabell med före/nu), bygg och merga först när Elias säger "kör". Skilj i svaret på vad Elias bad om och vad du själv valt.
+- **Elias idéer är värda att mäta (7/11).** "Man visar alltid produkter med handen" blev `--hand`, som gav ungefär tre gånger så många läsningar. Ta idén på allvar, bygg ett mätverktyg först (`tools/narmast.py`), sedan funktionen.
+- **Vid en dålig körning: titta på bilderna innan du gissar.** `python3 tools/mosaik.py NAMN` (eller `NAMN mitten`). 6/11 visade mosaikerna kameran mot taket, varan i bildens kant och motljus, inte fel i koden. Elias vill ha `sleep 15 &&` före körningar så att han hinner ställa sig.
 - **Användarperspektivet först (Elias, 5/11):** "ingen användare kommer ha det så idealt som vi har det". Tester på stöd i perfekt läge visar bara bästa fall. Röstens kommandon ska vara **korta och enkla handgrepp** för någon som inte ser, avstånd i **armlängd**, inte centimeter.
 - **Säg alltid vad du ändrat och varför**, och kommentera det i filhuvudet (de numrerade ändringslistorna i `barcode_scanner.py` är mönstret).
 - **Vanliga misstag att undvika** (alla har hänt):
@@ -52,7 +54,7 @@ Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätseri
 
 **Hårdvara**
 - Raspberry Pi 5, projektet ligger i `~/ai_glasses` med virtuell miljö (`source venv/bin/activate`).
-- Luxonis OAK-D Lite (**DepthAI 2.29.0.0 på Pi:n**, kontrollerat 5/11; tidigare stod 2.33 här, det var fel), går på **USB HIGH (USB2)**. **Y-adaptern var trasig (5/11)** och kameran sitter nu direkt i Pi:n. USB3 utan Y-adaptern är inte prövat: `lsusb -t` med kameran i en blå port (5000M = USB3, 480M = USB2).
+- Luxonis OAK-D Lite (**DepthAI 2.29.0.0 på Pi:n**, kontrollerat 5/11; tidigare stod 2.33 här, det var fel), direkt i Pi:n (Y-adaptern var trasig, 5/11). **USB 3 (SUPER) sedan 6/11, men bara med USB-C-kontakten vid kameran åt ett visst håll** (märkt). Kontrollera med `python3 tools/usb_hastighet.py`. Med USB 2 kom bara hälften av bilderna fram och 4K kraschade. **Kontakten är känslig**: vrids kameran (på huvudet) kraschar den; avlasta sladden.
 - Piper TTS (`sv_SE-alma-medium`) via `pw-play`; Logitech G435-headset med USB-dongel.
 - Gemini 2.5 Flash (`google-genai`).
 - Strömförsörjning: Baseus 65 W-powerbank (se avsnitt 5).
@@ -70,9 +72,11 @@ Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätseri
 | `measure_phrases.py` | Mätverktyg för fraslängd |
 | `barcode_scanner.py` | **Rumstestet:** streckkod → karta → position. Se avsnitt 3–4 |
 | `scan_filters.py` | Höjd- och djupfilter och modulantal (EAN-13/UPC-A 95, EAN-8 67). Bara standardbiblioteket, delas av skannern och analysen |
-| `analyze_scans.py` | Utvärderar filtren på `logs/scan_*.jsonl`. Går utan kameran |
+| `analyze_scans.py` | Utvärderar filtren på `logs/scan_*.jsonl`. `--pixlar`: säkra/osäkra läsningar per px/modul. `--lins`: linsläge vid säkra läsningar per avstånd. Går utan kameran |
+| `hand_region.py` | **Fokus på handen** (7/11): det närmaste föremålet inom en armlängd i djupbilden, `HandFocus` (när kameran ska få ny lins/ljus) och `lens_for_distance` (linstabellen ur `--lins`). Ren numpy |
+| `tools/` | Hjälpverktyg som överlever omstart: `usb_hastighet.py`, `sikte.py` (en bild till `logs/sikte.jpg`), `mosaik.py` (16 `--diag`-bilder från senaste körningen), `narmast.py` (ruta runt handen). Körs från `~/ai_glasses` |
 | `voice_guidance/` | **Röstvägledning** (3–5/11): `engine.py` (beslutslogik), `voice.py` (inkl. pip), `basket.py` (korgen), `catalog.py` (namn och `info`), `link.py` (JSON-länk för t.ex. C#), `session.py`, `replay.py`. Se `docs/ROSTVAGLEDNING.md` |
-| `tests/` | 146 enhetstester: `python3 -m unittest discover -s tests -t .` |
+| `tests/` | 200 enhetstester: `python3 -m unittest discover -s tests -t .` |
 | `docs/` | Arbetsloggar (PDF) och `ROSTVAGLEDNING.md`. Se avsnitt 11 |
 | `test_cam.py` | Gammal kameratest |
 
@@ -107,7 +111,7 @@ Mycket gick åt till att göra systemet stabilt och snabbt.
 **QGIS-fällor:** sök bara på "3006" (ett tankstreck i "EPSG:3006 – SWEREF99 TM" bröt sökningen). Avbocka "Detektera fälttyper" vid CSV-import så att inledande nollor i EAN behålls. Exportera GeoJSON med RFC7946=NO så att koordinaterna stannar i EPSG:3006.
 
 ### `barcode_scanner.py`
-Startade som ett utkast från en annan AI-agent. Granskad och rättad. Filhuvudet har numrerade ändringar 1–34 (20–27: filter och sammanfattning, PR #11; 28: EAN-8, PR #14; 29–31: röstvägledning, länk och tester, PR #16; 32: kartans `info` läses efter namnet, PR #21; 33: korgen skrivs ut vid avslut, PR #23; 34: `--fokusruta`, PR #26). I korthet:
+Startade som ett utkast från en annan AI-agent. Granskad och rättad. Filhuvudet har numrerade ändringar 1–35 (20–27: filter och sammanfattning, PR #11; 28: EAN-8, PR #14; 29–31: röstvägledning, länk och tester, PR #16; 32: kartans `info` läses efter namnet, PR #21; 33: korgen skrivs ut vid avslut, PR #23; 34: `--fokusruta`, PR #26; **35: `--hand`, PR #35 och #37**). I korthet:
 - Rättade krascher (`time.timedelta`, `msg.get` på en MessageGroup) och en begränsning av skanningstakten som bara gällde efter en träff (30 avkodningar/s = strömproblem).
 - **Extended disparity** så att djup finns ner till ~0,20 m (annars ~0,35 m). **Reservruta** för djup runt kodens yta.
 - `--diag`: sparar en bild varannan sekund i `logs/snapshots/` (max 60) med ljus- och skärpevärde, och grön ram runt funna koder.
@@ -233,6 +237,19 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 | 4K gav 3,4 px/modul på 0,29 m, 1080p 3,6 på 0,27 m. 4K borde ge ungefär det dubbla | Uppmätt, inte förklarat |
 | `--fokusruta` | Inte prövad på kameran |
 
+**Kameran, siktet och handen (6–7/11), uppmätt.** Detaljer: `docs/Vision5_handen_och_fokus_2026-11-07.pdf`.
+
+| Fynd | Status |
+|---|---|
+| **USB 3 kräver att USB-C-kontakten vid kameran sitter åt ett visst håll.** Då 5,0 av 5 bilder/s i 4K (förut 2,7 av 4,8). "Hälften av bilderna" var USB 2 | Uppmätt |
+| **Kamerans vinkel styr allt.** Med band pekade kameran för lågt eller mot taket, olika varje gång. En vara i ansiktshöjd hamnar ändå nära nederkanten (kameran sitter på pannan, ca 20° skillnad, beräknat). Hållaren behöver fast vinkel ca 20° nedåt | Uppmätt (mosaiker); vinkeln beräknad |
+| Motljus (fönster bakom varan) gör koden mörk. Med fönstret bakom testaren: 11 % | Uppmätt |
+| `--fokusruta` (mitten) gör det sämre när varan inte ligger i mitten | Uppmätt, en körning |
+| **Alla säkra läsningar (1 614 från 50 körningar) vid linsläge 66–92.** Misslyckade körningar: linsen på 26–64 | Uppmätt (`analyze_scans.py --lins`) |
+| **`--hand` (linsen efter handens avstånd): 13 och 15 % av bildrutorna med kod, utan: 4 och 4 %.** Linsen 73–76 med, 60–64 utan. Två rundor var, samma plats och ljus, en vara | Uppmätt |
+| Regeln "närmast = handen" tar fel när ingen hand hålls fram (pappersrulle, kroppen). Hela bilden läses ändå, så ingen kod missas, men lins och ljus kan hamna fel en stund | Uppmätt |
+| En enda läsning i stället för två hade gett **4 fel namn** i 88 loggar (två: 0) | Uppmätt (replay) |
+
 **Pi:n kan tappa wifi** (hände 27/10, `vision-pi1.local` gick inte att nå). Se avsnitt 9. **venv:** efter en omstart saknas `(venv)` i prompten och skannern säger `No module named 'cv2'`: kör `source venv/bin/activate`.
 
 **Test i uppställning att använda:** **koden nära mitten av bilden** (annars fokuserar autofokus på bakgrunden), köket i dagsljus, fönstret bakom kameran, **bara testobjektet i bild**, kameran plant, paketet rakt upp på ett stabilt stöd med rak framsida mot kameran, **tejpmarkerad bas för paketet och kamerans fötter** så att uppställningen kan upprepas. Mät vinkeln med mobilens vattenpass. Skriv ner varje ändring (en sak i taget). Mät avstånd med djupet, inte måttbandet.
@@ -242,6 +259,13 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 ## 7. Det jag tänkte göra härnäst, och varför
 
 **Tidsram (2026-10-17):** exjobbet börjar först nästa termin, så det finns ingen deadline att stressa mot. En person kommer då att hjälpa Elias med koden. Prioritera därför att det som byggs nu är **förstått, repeterbart och dokumenterat** framför att hinna med många funktioner. Ordningen nedan reviderades efter en genomgång samma dag: punkt 2 är ny, positionstestet är flyttat fram och vinkel och djupkontroll är sammanslagna i punkt 5. Kodändringar föreslås först och görs när Elias säger ja.
+
+**Status 7/11: fokus på handen fungerar (PR #31–#37).** `--hand` ställer linsen efter handens avstånd och gav ungefär tre gånger så många läsningar. Arbetslogg: `docs/Vision5_handen_och_fokus_2026-11-07.pdf`. **Nästa steg, i ordning:**
+1. Fler rundor med och utan `--hand`, fler varor (burk, blank påse, liten kod), blundande test. Kör alltid `python3 tools/usb_hastighet.py` först.
+2. **Handmodell** som bekräftar att det närmaste är en hand (MediaPipe, helst på kamerans processor; kontrollera att den ryms och passar DepthAI 2.29). Sedan kan rösten guida efter handen även utan kod ("Lyft varan lite.").
+3. Hållare med fast vinkel ca 20° nedåt (CAD-fil), vinklad USB 3-sladd. Batterikortet kommer 18–23/11 (avsnitt 5).
+4. **Väntar på Elias beslut:** tipsen väntar 8 s efter "Håll stilla." (säger annars emot efter 3 s); ny fras i stället för "en halv armlängd"; `--hand` som standard i varuläget. **Avgjort:** två läsningar krävs (en gav 4 fel namn); "Finns redan i korgen." vid återvisning är rätt (Elias testade det med flit).
+5. Butikstester när ICA ger tillstånd.
 
 **Status 5/11: röstvägledningen är körd och fungerar på Pi:n (PR #19–#28).** Vad som ändrats, vad som är uppmätt och vad som är osäkert: `docs/Vision5_rostvagledning_pa_pi_2026-11-05.pdf`. **Nästa steg, i ordning:**
 1. Kameran utan Y-adapter, nätadaptern, bra ljus. `git pull && sync`, `python3 tts_engine.py --prewarm`.
@@ -339,7 +363,13 @@ python3 -m unittest discover -s tests -t .                      # enhetstesterna
 python3 -m voice_guidance.replay logs/scan_*.jsonl --karta kartor/produkter.geojson   # vad hade vägledningen sagt? Felkod 1 om någon bekräftelse var fel
 python3 barcode_scanner.py --diag --4k --facit <EAN> --vagledning text   # röstvägledning, bara utskrift
 python3 barcode_scanner.py --diag --4k --facit <EAN> --vagledning tal --sikte huvud   # med röst (kör tts_engine.py --prewarm först)
-python3 barcode_scanner.py --vagledning tal --sikte hand --filter --diag --fokusruta   # som i proven 5/11 (--fokusruta: autofokus bara mitt i bilden)
+python3 tools/usb_hastighet.py                                  # USB 3 (SUPER)? Annars vänd USB-C-kontakten vid kameran
+clear && sleep 15 && python3 barcode_scanner.py --4k --hand --vagledning tal --sikte hand --filter --diag   # som i proven 7/11
+python3 tools/mosaik.py NAMN                                    # vad såg kameran? (NAMN mitten, eller NAMN 12:11:50 12:12:30)
+python3 tools/narmast.py --4k                                   # hittar den handen? 8 bilder till logs/narmast.jpg
+python3 tools/sikte.py                                          # en bild till logs/sikte.jpg: varan ska vara mitt i bild
+python3 analyze_scans.py --pixlar                               # säkra/osäkra läsningar per px/modul
+python3 analyze_scans.py --lins                                 # linsläge vid säkra läsningar per avstånd (linstabellen)
 dmesg | tail -30                                                # USB-fel vid kamerakrasch (error -71 = koppling/sladd)
 echo 'cd ~/ai_glasses && source venv/bin/activate' >> ~/.bashrc   # venv aktiveras automatiskt i nya terminaler
 python3 barcode_scanner.py --lank 5555                          # JSON-länk på 127.0.0.1:5555 för andra program (se docs/ROSTVAGLEDNING.md)
@@ -352,7 +382,7 @@ Sammanställning av alla körningar görs med `analyze_scans.py`, som läser `lo
 
 **När Pi:n inte går att nå** (`Could not resolve hostname vision-pi1.local`): kontrollera att lampan lyser grönt (Pi 5 har en lampa: grön = igång, röd = avstängd), att datorn är på samma wifi, och leta efter Pi:n med `arp -a` i PowerShell efter en pingrunda över nätet (`foreach ($i in 1..254) { $null = ping -n 1 -w 200 "192.168.50.$i" }`). Raspberry Pi har fysiska adresser som börjar med 2c-cf-67, d8-3a-dd, dc-a6-32, e4-5f-01, 28-cd-c1 eller b8-27-eb. 27/10 hade Pi:n tappat wifi. Förebygg med `sudo nmcli connection modify "<wifi-namnet>" connection.autoconnect yes`.
 
-Elias hämtar bilder genom att högerklicka i VS Code och välja **Download**. Skriv `clear` före en körning så att bara den nya utskriften kopieras. Översiktsbilder (de 16 senaste bilderna i en mosaik) har gjorts med ett kort OpenCV-skript. Skriv om det vid behov, och ta bilden **innan** bilderna rensas med `rm logs/snapshots/snap_*.jpg`.
+Elias hämtar bilder genom att högerklicka i VS Code och välja **Download**. Skriv `clear` före en körning så att bara den nya utskriften kopieras. Översiktsbilder görs med `python3 tools/mosaik.py NAMN` (bara den senaste körningen). Ta bilden **innan** bilderna rensas med `rm -f ~/ai_glasses/logs/snapshots/snap_*.jpg`.
 
 **Test av skannern utan kamera:** föregående agent testade med en låtsas-kamera (en `Device`-klass som levererar syntetiska bilder) och syntetiska EAN-13-koder med känd modulstorlek (kodningstabellerna L/G/R och paritet är standard). Den koden ligger inte i repot. Skriv om den om du ändrar `barcode_scanner.py`, och kontrollera `px_per_modul` mot kända modulstorlekar. Obs: testkodernas streck måste vara tillräckligt höga för roterade koder, annars går de inte att avkoda.
 
@@ -361,7 +391,9 @@ Elias hämtar bilder genom att högerklicka i VS Code och välja **Download**. S
 ## 10. Öppna frågor till Elias
 - Riktningskonventionen: Elias kör `--sikte hand` i proven (kameran stilla, varan i handen). Ska `hand` bli standard?
 - Är tipsen lätta att följa blundande? Är 10 s mellan dem lagom i längden? Saknas något kommando?
-- Hjälper `--fokusruta`? Avståndsvägledning med djupet, "Bra, håll stilla", detektorn: vilka ska byggas?
+- ~~Hjälper `--fokusruta`?~~ Nej när varan inte ligger i mitten (6/11); `--hand` ersätter den.
+- Ska `--hand` bli standard för varuläsning? Ska tipsen vänta 8 s efter "Håll stilla."? Vilken fras ersätter "en halv armlängd"?
+- Handmodell (MediaPipe) som nästa steg?
 - ~~Replay på de gamla loggarna~~ Gjort 4–5/11: 0 fel vara.
 - Grannvaror på en hylla: räknas två produkter nära varandra som konflikt (`conflict_radius`)? Testas i butiken.
 - ~~Ska en tunn läsning ge "lite närmare" i stället för tystnad~~ Beslutat och byggt 3/11.
@@ -370,7 +402,7 @@ Elias hämtar bilder genom att högerklicka i VS Code och välja **Download**. S
 - Vad ska uppställningen heta när den blir standard (tejpmärken, stöd, bakgrund), så att resultaten går att upprepa?
 - Vilken butik/vilka butiker finns det tillgång till för att spana in etiketter?
 - Röstvägledningen: ton, ord eller båda? Vilken konvention för riktning?
-- UPS-HAT 5 V/6 A beställs (5/11). Ny Y-adapter behövs inte med den.
+- UPS-HAT 5 V/6 A beställd (5/11), leverans 18–23/11. Ny Y-adapter behövs inte med den. Celler köpta?
 - Ska skärpa i kodens ruta loggas (se avsnitt 7, ursprunglig punkt 3)? Elias har inte tagit ställning.
 
 *Det fullständiga samtalsunderlaget (om det finns kvar i sessionens miljö) ligger under `~/.claude/projects/` för sessionen. Räkna inte med att det finns: miljön är tillfällig. Rådata (`logs/scan_*.jsonl`) ligger bara på Pi:n.*
@@ -383,6 +415,7 @@ Nyaste överst.
 
 | Fil | Innehåll |
 |---|---|
+| `docs/Vision5_handen_och_fokus_2026-11-07.pdf` | 6–7/11: USB 3 och kontakten, kamerans vinkel (mosaikerna), "Sakta närmare."/"Håll stilla.", en läsning gav 4 fel namn, linstabellen, `--hand` 13–15 % mot 4 %, vad som är osäkert, nästa steg |
 | `docs/Vision5_rostvagledning_pa_pi_2026-11-05.pdf` | Röstvägledningen på Pi:n 4–5/11: vad som hände i varje prov, felsökningen av kamerakrascherna (Y-adaptern), ändringarna PR #19–#28, vad som är osäkert, nästa steg |
 | `docs/Vision5_rostvagledning_2026-11-03.pdf` | Arbetslogg 3/11: vad som byggdes och varför, arkitekturen, hur det är testat (99 tester, mutationskontroll), vad som inte är testat, nästa steg |
 | `docs/Vision5_varutest_del2_2026-10-29.pdf` | Varutest del 2 (4K): Coca-Cola med EAN-8 läser till 0,71 m, kaffefiltret rakt och stabilt ger inga fel. **Rättar flera slutsatser i del 1** |
