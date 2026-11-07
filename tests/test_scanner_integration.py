@@ -220,9 +220,30 @@ class ScannerMainTest(unittest.TestCase):
         self.run_scanner("--fokusruta", "0.25", "--4k")
         self.build.assert_called_once_with(uhd=True, focus=None, focus_share=0.25, hand=False)
 
-    def test_without_the_flag_autofocus_is_unchanged(self):
-        self.run_scanner()
+    def test_hand_mode_is_the_default_and_can_be_turned_off(self):
+        out = self.run_scanner()
+        self.build.assert_called_once_with(uhd=False, focus=None, focus_share=None, hand=True)
+        self.assertIn("Fokus: efter handens avstånd", out)
+        out = self.run_scanner("--utan-hand")
         self.build.assert_called_once_with(uhd=False, focus=None, focus_share=None, hand=False)
+        self.assertIn("Fokus: autofokus", out)
+        self.assertNotIn("Hand: hittad", out)
+
+    def test_manual_focus_turns_hand_mode_off_without_complaint(self):
+        self.run_scanner("--fokus", "70")
+        self.build.assert_called_once_with(uhd=False, focus=70, focus_share=None, hand=False)
+
+    def test_hand_and_without_hand_together_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self.run_scanner("--hand", "--utan-hand")
+
+    def test_diag_pictures_go_to_a_folder_per_run(self):
+        import barcode_scanner
+        with mock.patch.object(barcode_scanner, "diagnose", return_value="📷 test") as diag:
+            self.run_scanner("--diag")
+        folder = diag.call_args[0][3]
+        self.assertTrue(folder.startswith(os.path.join("logs", "snapshots", "scan_")), folder)
+        self.assertTrue(folder.endswith("_1080p"), folder)
 
     def test_focus_region_and_locked_focus_cannot_be_combined(self):
         for flags in (("--fokusruta", "--fokus", "70"), ("--fokusruta", "0.05"), ("--fokusruta", "1.5")):

@@ -109,6 +109,10 @@
 #     Ändrat 7/11 efter provet: fokusrutan gav linsläge 26-37 (fokus långt bort) och suddig vara.
 #     Nu ställs linsen efter handens avstånd (hand_region.lens_for_distance, tabell ur
 #     analyze_scans.py --lins), ljuset följer fortfarande handrutan. Borta i 1 s: autofokus igen.
+# 36. Handläget är standard (Elias 7/11, efter 13-15 % mot 4 % utan). --utan-hand stänger av det;
+#     --fokus och --fokusruta stänger också av det. --hand finns kvar och gör ingenting nytt.
+#     --diag sparar bilderna i en egen mapp per körning, logs/snapshots/<loggens namn>/, så att
+#     tools/mosaik.py kan visa äldre körningar (förut skrevs allt i samma mapp och rensades). (2026-11-07)
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
@@ -130,7 +134,7 @@ Kör:     python3 barcode_scanner.py [kartor/produkter.geojson] [--diag] [--4k] 
          --vagledning text|tal  röstvägledning: skriv ut eller läs upp beskeden (voice_guidance/)
          --sikte huvud|hand     riktningarna: vrid huvudet mot koden, eller flytta varan
          --lank PORT            länk till andra program på 127.0.0.1:PORT (JSON-rader)
-         --hand                 fokus (efter avstånd), ljus och avkodning följer handen med varan (ändring 35)
+         --utan-hand            stäng av handläget (standard sedan ändring 36: fokus efter handens avstånd)
 Logg:    logs/scan_<datum>_<tid>_<4k|1080p>.jsonl (en rad per avläsning)
 """
 import argparse
@@ -616,7 +620,9 @@ def main():
     ap.add_argument("--fokusruta", type=float, nargs="?", const=FOCUS_REGION_DEFAULT, metavar="ANDEL",
                     help=f"autofokus bara på en ruta mitt i bilden (andel av bredd och höjd, standard {FOCUS_REGION_DEFAULT})")
     ap.add_argument("--hand", action="store_true",
-                    help="fokus, ljus och avkodning på det närmaste föremålet inom en armlängd (handen med varan)")
+                    help="handläget (standard): fokus efter handens avstånd, ljus och avkodning på handen med varan")
+    ap.add_argument("--utan-hand", dest="utan_hand", action="store_true",
+                    help="stäng av handläget: vanlig autofokus och hela bilden")
     ap.add_argument("--facit", metavar="EAN",
                     help="rätt streckkod i testet: loggar varje läsning som rätt/fel och märker felläsningar")
     ap.add_argument("--filter", action="store_true",
@@ -636,6 +642,9 @@ def main():
         sys.exit("❌ --fokus låser linsen och --fokusruta styr autofokus: välj en av dem")
     if args.hand and (args.fokus is not None or args.fokusruta is not None):
         sys.exit("❌ --hand styr fokus själv: använd den utan --fokus och --fokusruta")
+    if args.hand and args.utan_hand:
+        sys.exit("❌ --hand och --utan-hand: välj en")
+    use_hand = not args.utan_hand and args.fokus is None and args.fokusruta is None   # standard (ändring 36)
     if args.lank is not None and not 0 <= args.lank <= 65535:
         sys.exit(f"❌ --lank {args.lank} är ingen giltig port (0-65535)")
     facit = None
@@ -655,7 +664,7 @@ def main():
              "tries": 0, "hit_frames": 0, "right_frames": 0, "lens_all": [], "lens_hit": [],
              "filtered": {}, "kept_right": 0, "kept_wrong": 0, "right_frames_kept": 0,
              "msgs": 0, "t_first": None, "t_last": None, "seq_first": None, "seq_last": None,
-             "decode_ms": [], "hand_frames": 0, "crop_hits": 0, "hand_mode": args.hand}
+             "decode_ms": [], "hand_frames": 0, "crop_hits": 0, "hand_mode": use_hand}
     if facit:
         print(f"Facit: {facit}. Felläsningar markeras.")
 
@@ -667,14 +676,14 @@ def main():
                                  AimConvention.HEAD if args.sikte == "huvud" else AimConvention.HAND, args.lank)
     except OSError as e:   # t.ex. porten är upptagen
         sys.exit(f"❌ Kunde inte öppna länken på port {args.lank}: {e}")
-    with dai.Device(build_pipeline(uhd=args.uhd, focus=args.fokus, focus_share=args.fokusruta, hand=args.hand)) as device, open(log_path, "a", encoding="utf-8") as log:
+    with dai.Device(build_pipeline(uhd=args.uhd, focus=args.fokus, focus_share=args.fokusruta, hand=use_hand)) as device, open(log_path, "a", encoding="utf-8") as log:
         usb = device.getUsbSpeed()
         print(f"Kamera: {'4K 3840x2160 @ ' + str(UHD_FPS) if args.uhd else '1080p @ ' + str(CAMERA_FPS)} fps, USB {usb.name}")
         if args.fokus is not None:
             print(f"Fokus: manuell, linsposition {args.fokus}")
         elif args.fokusruta is not None:
             print(f"Fokus: autofokus, bara rutan i mitten ({args.fokusruta * 100:.0f} % av bredd och höjd)")
-        elif args.hand:
+        elif use_hand:
             print("Fokus: efter handens avstånd, ljuset efter handen (det närmaste inom en armlängd); utan hand autofokus")
         else:
             print("Fokus: autofokus")
@@ -682,13 +691,13 @@ def main():
         if args.uhd and usb not in (dai.UsbSpeed.SUPER, dai.UsbSpeed.SUPER_PLUS):
             print("⚠️  4K kräver USB3 (blå port). Med USB2 kan bilden hacka eller utebli.")
         q = device.getOutputQueue(name="out", maxSize=4, blocking=False)
-        control_q = device.getInputQueue("control") if args.hand else None
-        hand_focus = HandFocus() if args.hand else None
+        control_q = device.getInputQueue("control") if use_hand else None
+        hand_focus = HandFocus() if use_hand else None
         print(f"Söker efter streckkoder (max ~{1 / scan_interval:.0f}/s). Loggar till {log_path}. Ctrl+C avslutar.")
         last_scan = last_diag = 0.0
         started = time.time()
         n_saved = 0
-        diag_dir = "logs/snapshots"
+        diag_dir = os.path.join("logs", "snapshots", os.path.basename(log_path)[:-len(".jsonl")])   # ändring 36
         if args.diag:
             os.makedirs(diag_dir, exist_ok=True)
             print(f"Diagnostik PÅ: bild var {DIAG_INTERVAL_S:.0f}:e sekund till {diag_dir}/ (max {DIAG_MAX_IMAGES})")
