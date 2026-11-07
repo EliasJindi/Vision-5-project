@@ -105,11 +105,16 @@ class ControlRecorder:
 
 
 class FakeCameraControl:
+    AutoFocusMode = types.SimpleNamespace(CONTINUOUS_VIDEO="continuous_video")
+
     def __init__(self):
         self.calls = []
 
-    def setAutoFocusRegion(self, *args):
-        self.calls.append(("focus", args))
+    def setManualFocus(self, lens):
+        self.calls.append(("lens", lens))
+
+    def setAutoFocusMode(self, mode):
+        self.calls.append(("autofocus", mode))
 
     def setAutoExposureRegion(self, *args):
         self.calls.append(("exposure", args))
@@ -240,7 +245,7 @@ class ScannerMainTest(unittest.TestCase):
         depth[400:720, 700:1100] = 350                                    # handen nere till höger, som 6/11
         out = self.run_scanner("--hand", center=(1300, 800), depth=depth)
         hand = self.log_records()
-        self.assertIn("Fokus: autofokus och ljus följer handen", out)
+        self.assertIn("Fokus: efter handens avstånd, ljuset efter handen", out)
         self.assertEqual({r["avkodat_i"] for r in hand}, {"ruta"})
         # Samma koordinater som utan handruta. zxing kan hamna 1 px annorlunda i en beskuren bild, inte mer.
         for got, want in zip(hand, plain):
@@ -251,7 +256,11 @@ class ScannerMainTest(unittest.TestCase):
         self.assertIn("koden hittad i handrutan 6 gånger", out)
         sent = FakeDevice.last.control.sent
         self.assertEqual(len(sent), 1)                                    # handen står still: en gång räcker
-        self.assertEqual([kind for kind, _ in sent[0].calls], ["focus", "exposure"])
+        from hand_region import lens_for_distance
+        self.assertEqual(sent[0].calls[0], ("lens", lens_for_distance(hand[0]["hand_m"])))   # linsen efter avståndet
+        self.assertEqual(sent[0].calls[1][0], "exposure")
+        x, y, w, h = sent[0].calls[1][1]
+        self.assertTrue(x >= 1000 and y >= 500, (x, y))                   # ljuset efter handen nere till höger
 
     def test_a_code_outside_the_hand_is_still_found(self):
         depth = np.full((720, 1280), 1500, np.uint16)
@@ -264,6 +273,26 @@ class ScannerMainTest(unittest.TestCase):
         self.assertEqual(FakeDevice.last.control.sent, [])
         self.assertEqual({r["avkodat_i"] for r in self.log_records()}, {"hela"})
         self.assertIn("Hand: hittad i 0 av", out)
+
+    def test_when_the_hand_goes_away_autofocus_comes_back(self):
+        import barcode_scanner
+        sent = []
+
+        class Queue:
+            def send(self, ctrl):
+                sent.append(ctrl)
+
+        hand = barcode_scanner.HandFocus()
+        region = barcode_scanner.find_near_region(np.pad(np.full((320, 400), 350, np.uint16), ((400, 0), (700, 180)),
+                                                         constant_values=1500))
+        fake_dai = types.SimpleNamespace(CameraControl=FakeCameraControl)
+        with mock.patch.object(barcode_scanner, "dai", fake_dai):
+            for t, r in ((0.0, region), (0.5, None), (2.0, None)):
+                command = hand.update(t, r)
+                if command is not None:
+                    barcode_scanner.send_focus(Queue(), command, 1920, 1080)
+        self.assertEqual([c.calls[0][0] for c in sent], ["lens", "autofocus"])
+        self.assertEqual(sent[1].calls[1], ("exposure", (0, 0, 1920, 1080)))   # ljuset över hela bilden igen
 
     def test_hand_mode_cannot_be_combined_with_other_focus_flags(self):
         for flags in (("--hand", "--fokus", "70"), ("--hand", "--fokusruta")):

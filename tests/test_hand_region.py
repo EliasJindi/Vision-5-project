@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from hand_region import FocusCommand, HandFocus, NearRegion, cell_medians, find_near_region
+from hand_region import LENS_TABLE, FocusCommand, HandFocus, NearRegion, cell_medians, find_near_region, lens_for_distance
 
 H, W = 720, 1280
 
@@ -111,6 +111,12 @@ class HandFocusTest(unittest.TestCase):
         self.assertIsNone(self.focus.update(0.3, moved))                    # för tätt
         self.assertEqual(self.focus.update(0.6, moved), FocusCommand(moved))
 
+    def test_a_hand_that_comes_closer_counts_as_moved_so_the_lens_follows(self):
+        self.focus.update(0.0, self.hand)
+        closer = NearRegion(0.45, 0.45, 0.9, 0.95, 0.30, 0.2)            # samma ruta, 5 cm närmare
+        self.assertEqual(self.focus.update(1.0, closer).region, closer)
+        self.assertIsNone(self.focus.update(2.0, NearRegion(0.45, 0.45, 0.9, 0.95, 0.31, 0.2)))   # 1 cm: brus
+
     def test_a_hand_that_grows_counts_as_moved(self):
         self.focus.update(0.0, self.hand)
         closer = box(0.4, 0.35, 0.95, 1.0)                                  # samma mitt, större
@@ -129,6 +135,25 @@ class HandFocusTest(unittest.TestCase):
         self.assertAlmostEqual(crop.y1, 1.0)
         self.assertIsNone(self.focus.crop(1.5))
         self.assertIsNone(HandFocus().crop(0.0))
+
+
+class LensForDistanceTest(unittest.TestCase):
+    def test_the_table_points_are_hit_exactly(self):
+        for distance, lens in LENS_TABLE:
+            self.assertEqual(lens_for_distance(distance), lens, distance)
+
+    def test_between_points_it_interpolates(self):
+        self.assertEqual(lens_for_distance(0.25), 79)                      # mitt emellan 82 och 76
+        self.assertEqual(lens_for_distance(0.375), 75)                     # mitt emellan 76 och 74
+
+    def test_outside_the_table_it_holds_the_ends(self):
+        self.assertEqual(lens_for_distance(0.10), 82)
+        self.assertEqual(lens_for_distance(2.0), 66)
+
+    def test_every_value_lies_where_reads_have_succeeded(self):
+        # analyze_scans --lins 7/11: alla säkra läsningar vid linsläge 66-92
+        for cm in range(15, 100):
+            self.assertTrue(66 <= lens_for_distance(cm / 100) <= 92, cm)
 
 
 if __name__ == "__main__":
