@@ -66,7 +66,7 @@ class GuidanceConfig:
     no_code_repeat_s: float = 6.0    # ...nästa tips så här tätt...
     no_code_fast: int = 3            # ...de första så här många gångerna...
     no_code_slow_repeat_s: float = 10.0   # ...sedan så här glest tills en kod syns (0 = tyst efter de täta; båda 0 = aldrig)
-    ready_after_s: float = 15.0      # "redo för nästa vara" så här länge efter att en bekräftad vara försvann (0 = aldrig)
+    ready_after_s: float = 8.0       # "redo för nästa vara" så här länge efter att en bekräftad vara försvann (0 = aldrig; 15 s före 7/11: för tyst)
     steady_after_s: float = 0.9      # "håll stilla" om den andra säkra läsningen dröjer så här länge (0 = aldrig)
     cue_interval_s: float = 1.0      # pip när en osäker kod syns men talet hålls tillbaka, högst så här ofta (0 = av)
     cue_quiet_s: float = 1.2         # inget pip så här snart efter tal, så att pipet inte hamnar mitt i en fras

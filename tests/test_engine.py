@@ -255,9 +255,9 @@ class SeenCodeTest(unittest.TestCase):
         engine = GuidanceEngine(CATALOG)
         engine.update(frame(0.0, read()))
         engine.update(frame(0.5, read()))                                 # bekräftad
-        said = [(t, engine.update(seen(t, (0.5, 0.5)))) for t in (1.0, 3.0, 6.0, 9.0)]
+        said = [(t, engine.update(seen(t, (0.5, 0.5)))) for t in (1.0, 3.0, 6.0, 8.0)]
         self.assertTrue(all(a is None for _, a in said), said)            # inget "håll stilla" när varan läggs ned
-        self.assertEqual(engine.update(frame(16.0)).kind, ActionKind.READY)   # 15 s efter sista läsningen, som förut
+        self.assertEqual(engine.update(frame(8.5)).kind, ActionKind.READY)   # 8 s efter sista läsningen, som förut
 
     def test_old_logs_without_detector_behave_as_before(self):
         self.assertEqual(FrameObservation(0.0).seen, ())
@@ -380,7 +380,7 @@ class NoCodeTest(unittest.TestCase):
         self.engine.update(frame(0.0, read()))
         self.engine.update(frame(0.5, read()))                      # bekräftad
         self.engine.update(frame(1.0, read()))                      # varan syns fortfarande en stund
-        self.assertEqual(self.run_empty(1.5, 90.0), [(16.0, ActionKind.READY)])   # 15 s efter sista läsningen
+        self.assertEqual(self.run_empty(1.5, 90.0), [(9.0, ActionKind.READY)])   # 8 s efter sista läsningen
 
     def test_ready_waits_while_the_confirmed_product_is_still_in_view(self):
         self.engine.update(frame(0.0, read()))
@@ -391,18 +391,18 @@ class NoCodeTest(unittest.TestCase):
     def test_a_new_code_before_ready_cancels_it(self):
         self.engine.update(frame(0.0, read()))
         self.engine.update(frame(0.5, read()))
-        self.engine.update(frame(10.0, read(EAN_B, thin=True)))     # nästa vara dyker upp
-        said = self.run_empty(10.5, 40.0)
+        self.engine.update(frame(5.0, read(EAN_B, thin=True)))      # nästa vara dyker upp innan "redo"
+        said = self.run_empty(5.5, 40.0)
         self.assertNotIn(ActionKind.READY, [k for _, k in said])
-        self.assertEqual(said, [(14.0, ActionKind.NO_CODE), (20.0, ActionKind.NO_CODE_TURN),
-                                (26.0, ActionKind.NO_CODE_FLIP), (36.0, ActionKind.NO_CODE)])
+        self.assertEqual(said, [(9.0, ActionKind.NO_CODE), (15.0, ActionKind.NO_CODE_TURN),
+                                (21.0, ActionKind.NO_CODE_FLIP), (31.0, ActionKind.NO_CODE)])
 
     def test_the_same_product_glimpsed_after_it_was_forgotten_does_not_restart_the_hints(self):
         # Provet 5/11: tomatpurén bekräftad, borta i över 5 s, en enda läsning till, sedan "hittar ingen streckkod".
         self.engine.update(frame(0.0, read()))
         self.engine.update(frame(0.5, read()))                      # bekräftad
         self.assertIsNone(self.engine.update(frame(7.0, read())))   # glömd (>5 s), skymtar förbi en gång
-        self.assertEqual(self.run_empty(7.5, 40.0), [(22.0, ActionKind.READY)])   # 15 s efter, inga tips
+        self.assertEqual(self.run_empty(7.5, 40.0), [(15.0, ActionKind.READY)])   # 8 s efter, inga tips
 
     def test_the_previous_product_counts_as_a_new_code_once_a_new_search_has_begun(self):
         self.engine.update(frame(0.0, read()))
