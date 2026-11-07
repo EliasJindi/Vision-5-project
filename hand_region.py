@@ -8,6 +8,9 @@
 # 2026-11-06 (steg 2): HandFocus bestämmer när kamerans fokus och ljus ska flyttas till handen och
 #   vilken ruta skannern ska läsa först (barcode_scanner.py --hand). tools/narmast.py visade rutan
 #   på handen med varan i 8 av 8 bilder.
+# 2026-11-07: fokus ställs efter handens AVSTÅND (lens_for_distance), inte med en fokusruta. Provet
+#   7/11: med fokusrutan stod linsen på 26-37 (långt bort) trots att handen var på 0,3-0,5 m, och
+#   varan var suddig. analyze_scans.py --lins: alla säkra läsningar har skett vid linsläge 66-92.
 # =========================================================================
 """
 hand_region.py - Rutan runt det närmaste föremålet (handen med varan) i en djupbild.
@@ -115,6 +118,22 @@ def find_near_region(depth_mm: np.ndarray, min_mm: int = 200, max_mm: int = 800,
                       depth_m=float(np.median([med[p] for p in part])) / 1000, area=len(part) / (gh * gw))
 
 
+# Linsläge per avstånd: medianer från analyze_scans.py --lins 7/11 (1 614 säkra, rätta läsningar från
+# 50 körningar). 0,35-0,50 m är viktat efter antal körningar (2, 6 och 4); över 0,5 m bygger på 1-2
+# körningar. Under 0,20 m är djupet opålitligt och räknas inte. Mellan punkterna interpoleras linjärt.
+LENS_TABLE = ((0.225, 82), (0.275, 76), (0.325, 76), (0.425, 74), (0.55, 67), (0.675, 66))
+
+
+def lens_for_distance(distance_m: float) -> int:
+    """Linsläget (0-255) där en kod på distance_m meter har lästs säkert, enligt LENS_TABLE."""
+    if distance_m <= LENS_TABLE[0][0]:
+        return LENS_TABLE[0][1]
+    for (d0, l0), (d1, l1) in zip(LENS_TABLE, LENS_TABLE[1:]):
+        if distance_m <= d1:
+            return int(round(l0 + (l1 - l0) * (distance_m - d0) / (d1 - d0)))
+    return LENS_TABLE[-1][1]
+
+
 @dataclass(frozen=True)
 class FocusCommand:
     """Flytta kamerans fokus och ljus till region, eller tillbaka till hela bilden (region None)."""
@@ -129,8 +148,8 @@ class HandFocus:
     """
 
     def __init__(self, min_interval_s: float = 0.5, move: float = 0.05, grow: float = 0.2,
-                 lost_after_s: float = 1.0, margin: float = 0.1) -> None:
-        self._min_interval_s, self._move, self._grow = min_interval_s, move, grow
+                 lost_after_s: float = 1.0, margin: float = 0.1, closer: float = 0.03) -> None:
+        self._min_interval_s, self._move, self._grow, self._closer = min_interval_s, move, grow, closer
         self._lost_after_s, self._margin = lost_after_s, margin
         self._current: Optional[NearRegion] = None   # senast sedda handen
         self._sent: Optional[NearRegion] = None      # rutan kameran fokuserar på (None = hela bilden)
@@ -158,6 +177,8 @@ class HandFocus:
         return self._current.expanded(self._margin)
 
     def _moved(self, new: NearRegion, old: NearRegion) -> bool:
+        if abs(new.depth_m - old.depth_m) > self._closer:   # närmare eller längre bort: linsen ska flyttas
+            return True
         (nx, ny), (ox, oy) = new.center, old.center
         if abs(nx - ox) > self._move or abs(ny - oy) > self._move:
             return True

@@ -106,6 +106,9 @@
 #     aldrig dölja en kod. Loggen får "hand", "hand_m" och "avkodat_i"; sammanfattningen visar
 #     avkodningstiden. Rutan är testad med tools/narmast.py (8 av 8 bilder på handen); styrningen av
 #     fokus är inte testad på kameran när den skrevs. (2026-11-06)
+#     Ändrat 7/11 efter provet: fokusrutan gav linsläge 26-37 (fokus långt bort) och suddig vara.
+#     Nu ställs linsen efter handens avstånd (hand_region.lens_for_distance, tabell ur
+#     analyze_scans.py --lins), ljuset följer fortfarande handrutan. Borta i 1 s: autofokus igen.
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
@@ -127,7 +130,7 @@ Kör:     python3 barcode_scanner.py [kartor/produkter.geojson] [--diag] [--4k] 
          --vagledning text|tal  röstvägledning: skriv ut eller läs upp beskeden (voice_guidance/)
          --sikte huvud|hand     riktningarna: vrid huvudet mot koden, eller flytta varan
          --lank PORT            länk till andra program på 127.0.0.1:PORT (JSON-rader)
-         --hand                 fokus, ljus och avkodning följer handen med varan (ändring 35)
+         --hand                 fokus (efter avstånd), ljus och avkodning följer handen med varan (ändring 35)
 Logg:    logs/scan_<datum>_<tid>_<4k|1080p>.jsonl (en rad per avläsning)
 """
 import argparse
@@ -143,7 +146,7 @@ import depthai as dai
 import numpy as np
 import zxingcpp
 
-from hand_region import HandFocus, find_near_region
+from hand_region import HandFocus, find_near_region, lens_for_distance
 from scan_filters import FILTER_TEXT, depth_plausible, expected_depth, is_thin, modules_for, size_from_corners
 from voice_guidance import AimConvention, GuidanceMode, create_session
 from voice_guidance.catalog import parse_details
@@ -331,11 +334,17 @@ def decode_frame(color, crop=None):
 
 
 def send_focus(control_queue, command, width, height):
-    """Flyttar kamerans autofokus och exponering till handen, eller tillbaka till hela bilden."""
-    x, y, w, h = command.region.to_pixels(width, height) if command.region else (0, 0, width, height)
+    """
+    Handen syns: linsen ställs efter handens avstånd och exponeringen efter handrutan.
+    Handen borta: vanlig autofokus och exponering över hela bilden igen.
+    """
     ctrl = dai.CameraControl()
-    ctrl.setAutoFocusRegion(x, y, w, h)
-    ctrl.setAutoExposureRegion(x, y, w, h)
+    if command.region is not None:
+        ctrl.setManualFocus(lens_for_distance(command.region.depth_m))
+        ctrl.setAutoExposureRegion(*command.region.to_pixels(width, height))
+    else:
+        ctrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.CONTINUOUS_VIDEO)
+        ctrl.setAutoExposureRegion(0, 0, width, height)
     control_queue.send(ctrl)
 
 
@@ -666,7 +675,7 @@ def main():
         elif args.fokusruta is not None:
             print(f"Fokus: autofokus, bara rutan i mitten ({args.fokusruta * 100:.0f} % av bredd och höjd)")
         elif args.hand:
-            print("Fokus: autofokus och ljus följer handen (det närmaste inom en armlängd), annars hela bilden")
+            print("Fokus: efter handens avstånd, ljuset efter handen (det närmaste inom en armlängd); utan hand autofokus")
         else:
             print("Fokus: autofokus")
         print(f"Filter: {'PÅ (avvisar tunna remsor, ingen position vid orimligt djup)' if args.filter else 'AV (loggas och märks bara)'}")
