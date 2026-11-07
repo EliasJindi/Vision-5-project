@@ -7,6 +7,7 @@
 # gul = detektorns kod) och skriver ut tiden detektorn tar. Ändrar ingenting i skannern.
 #   python3 tools/streckkod.py              (4K, 30 s)
 #   python3 tools/streckkod.py --sekunder 45 --skala 0.5   (detektorn på halv upplösning: snabbare?)
+#   clear && sleep 15 && python3 tools/streckkod.py      (15 s att ställa sig först). Ctrl+C avslutar och sammanfattar.
 # Vrid varan under tiden: koden synlig ibland, bortvänd ibland, så syns både träffar och falsklarm.
 # =========================================================================
 import argparse
@@ -64,41 +65,44 @@ def main():
         control = device.getInputQueue("control")
         focus = HandFocus()
         t0 = last = time.time()
-        while time.time() - t0 < args.sekunder:
-            msg = q.get()
-            now = time.time()
-            if now - last < 0.5:                          # samma takt som skannern i 4K
-                continue
-            last = now
-            color, depth = msg["color"].getCvFrame(), msg["depth"].getFrame()
-            region = find_near_region(depth)
-            command = focus.update(now, region)
-            if command is not None:
-                bs.send_focus(control, command, color.shape[1], color.shape[0])
-            crop = focus.crop(now)
-            found = []
-            if crop is not None:
-                x, y, w, h = crop.to_pixels(color.shape[1], color.shape[0])
-                part = color[y:y + h, x:x + w]
-                if args.skala < 1.0:
-                    part = cv2.resize(part, None, fx=args.skala, fy=args.skala)
-                t = time.perf_counter()
-                found = quads(detector.detect(part), x, y, args.skala)
-                ms.append((time.perf_counter() - t) * 1000)
-            results, _ = bs.decode_frame(color, crop)
-            rows.append((region is not None, bool(found), bool(results)))
-            if now - t0 >= 3 and len(tiles) < 60:            # efter uppstarten, högst 60 bilder
-                img = color.copy()
-                if region is not None:
-                    rx, ry, rw, rh = region.to_pixels(img.shape[1], img.shape[0])
-                    cv2.rectangle(img, (rx, ry), (rx + rw, ry + rh), (255, 128, 0), 8)
-                for qd in found:
-                    cv2.polylines(img, [np.array(qd, np.int32)], True, (0, 255, 255), 8)
-                text = f"{'hand' if region else 'ingen hand'} | detektor: {'JA' if found else 'nej'} | last: {'JA' if results else 'nej'}"
-                tile = cv2.resize(img, (TILE_W, TILE_H))
-                cv2.putText(tile, text, (8, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
-                tiles.append(tile)
-                print(f"  {now - t0:5.1f} s  {text}")
+        try:
+            while time.time() - t0 < args.sekunder:
+                msg = q.get()
+                now = time.time()
+                if now - last < 0.5:                          # samma takt som skannern i 4K
+                    continue
+                last = now
+                color, depth = msg["color"].getCvFrame(), msg["depth"].getFrame()
+                region = find_near_region(depth)
+                command = focus.update(now, region)
+                if command is not None:
+                    bs.send_focus(control, command, color.shape[1], color.shape[0])
+                crop = focus.crop(now)
+                found = []
+                if crop is not None:
+                    x, y, w, h = crop.to_pixels(color.shape[1], color.shape[0])
+                    part = color[y:y + h, x:x + w]
+                    if args.skala < 1.0:
+                        part = cv2.resize(part, None, fx=args.skala, fy=args.skala)
+                    t = time.perf_counter()
+                    found = quads(detector.detect(part), x, y, args.skala)
+                    ms.append((time.perf_counter() - t) * 1000)
+                results, _ = bs.decode_frame(color, crop)
+                rows.append((region is not None, bool(found), bool(results)))
+                if now - t0 >= 3 and len(tiles) < 60:            # efter uppstarten, högst 60 bilder
+                    img = color.copy()
+                    if region is not None:
+                        rx, ry, rw, rh = region.to_pixels(img.shape[1], img.shape[0])
+                        cv2.rectangle(img, (rx, ry), (rx + rw, ry + rh), (255, 128, 0), 8)
+                    for qd in found:
+                        cv2.polylines(img, [np.array(qd, np.int32)], True, (0, 255, 255), 8)
+                    text = f"{'hand' if region else 'ingen hand'} | detektor: {'JA' if found else 'nej'} | last: {'JA' if results else 'nej'}"
+                    tile = cv2.resize(img, (TILE_W, TILE_H))
+                    cv2.putText(tile, text, (8, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
+                    tiles.append(tile)
+                    print(f"  {now - t0:5.1f} s  {text}")
+        except KeyboardInterrupt:
+            print("\nAvbruten: sammanfattar det som hann samlas in.")
     stats = summarize(rows)
     picked = [tiles[round(i * (len(tiles) - 1) / max(1, min(16, len(tiles)) - 1))] for i in range(min(16, len(tiles)))]
     while picked and len(picked) % 4:
