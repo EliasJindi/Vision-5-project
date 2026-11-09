@@ -23,6 +23,10 @@
 #   jämför dem. Djupet säger VAR handen troligen är, modellen avgör OM det är en hand.
 # 2026-11-09 (Elias: "är du säker på att det är pga konsekventa saker?"): --namn ger en mosaik per körning,
 #   och sammanfattningen visar regeln för steg B direkt: blå ruta bekräftad om en hand setts i den inom 2 s.
+# 2026-11-09 (väg B, Elias: "vi testar B"): bordet med varor gav falsklarm (16-26 %) som handflatemodellen
+#   inte kan skilja ut. Som i MediaPipe bekräftas nu varje handflata i den blå rutan av landmärkesmodellen
+#   (hand_landmark_lite_sh4.blob, 224x224), som ger ett eget värde för 'det här är en hand'. Handrutan
+#   skärs ut ur 4K-bilden (hand_rect). Sammanfattningen visar regeln med och utan den.
 # =========================================================================
 import argparse
 import hashlib
@@ -42,6 +46,12 @@ MODEL_PATH = "models/palm_detection_sh4.blob"
 MODEL_URL = "https://raw.githubusercontent.com/geaxgx/depthai_hand_tracker/main/models/palm_detection_sh4.blob"
 MODEL_SHA256 = "4d45ecfddc68d8365fef3cb633d78b916612f25f7a48898f90f8a47d4b151aa5"
 INPUT = 128           # modellens bild: 128 x 128
+# Steg 2 i MediaPipe (väg B, Elias 9/11): landmärkesmodellen (21 punkter på handen) bekräftar en handflata
+# med ett eget värde för "det här är en hand". Lätta versionen, standard i referenskoden.
+LM_PATH = "models/hand_landmark_lite_sh4.blob"
+LM_URL = "https://raw.githubusercontent.com/geaxgx/depthai_hand_tracker/main/models/hand_landmark_lite_sh4.blob"
+LM_SHA256 = "98f2e9642099a572c96e80af944212efec199cdea1995ef391fab0d3a9da45fd"
+LM_INPUT = 224        # landmärkesmodellens bild: 224 x 224
 TILE_W, TILE_H = 480, 270
 
 
@@ -53,6 +63,7 @@ class Palm:
     y0: float
     x1: float
     y1: float
+    kps: Tuple[Tuple[float, float], ...] = ()   # 7 punkter (0 = handleden, 2 = långfingrets knoge)
 
 
 def palm_anchors(size: int = INPUT) -> np.ndarray:
@@ -86,8 +97,32 @@ def decode_palms(scores: Sequence[float], regressors: Sequence[float], anchors: 
         w, h = reg[i, 2] / size, reg[i, 3] / size
         if w <= 0 or h <= 0:
             continue
-        palms.append(Palm(float(prob[i]), float(cx - w / 2), float(cy - h / 2), float(cx + w / 2), float(cy + h / 2)))
+        kps = tuple((float(reg[i, 4 + 2 * k] / size + anchors[i, 0]), float(reg[i, 5 + 2 * k] / size + anchors[i, 1]))
+                    for k in range(7))
+        palms.append(Palm(float(prob[i]), float(cx - w / 2), float(cy - h / 2), float(cx + w / 2), float(cy + h / 2), kps))
     return palms
+
+
+def hand_rect(palm: Palm, ox: float, oy: float, side: float, scale: float = 2.6,
+              shift_y: float = -0.5) -> List[Tuple[float, float]]:
+    """
+    Handrutan som landmärkesmodellen ska se, som fyra hörn i kamerabildens pixlar. palm är i den
+    kvadratiska modellbilden (0-1); kvadratens övre vänstra hörn ligger på (ox, oy) och sidan är side
+    pixlar i kamerabilden. Som MediaPipes palm_detection_detection_to_roi: vriden så att handleden är
+    nere och långfingret uppe, flyttad en halv handflata mot fingrarna, scale gånger handflatans
+    längsta sida. Hörnen: [nere vänster, uppe vänster, uppe höger, nere höger] i handens riktning.
+    """
+    (x0, y0), (x2, y2) = palm.kps[0], palm.kps[2]
+    rotation = math.pi / 2 - math.atan2(-(y2 - y0), x2 - x0)
+    rotation = rotation - 2 * math.pi * math.floor((rotation + math.pi) / (2 * math.pi))
+    w, h = (palm.x1 - palm.x0) * side, (palm.y1 - palm.y0) * side
+    cx = ox + (palm.x0 + palm.x1) / 2 * side - h * shift_y * math.sin(rotation)
+    cy = oy + (palm.y0 + palm.y1) / 2 * side + h * shift_y * math.cos(rotation)
+    size = max(w, h) * scale
+    b, a = math.cos(rotation) * 0.5, math.sin(rotation) * 0.5
+    p0 = (cx - a * size - b * size, cy + b * size - a * size)
+    p1 = (cx + a * size - b * size, cy - b * size - a * size)
+    return [p0, p1, (2 * cx - p0[0], 2 * cy - p0[1]), (2 * cx - p1[0], 2 * cy - p1[1])]
 
 
 def iou(a: Palm, b: Palm) -> float:
@@ -179,17 +214,17 @@ def summarize(rows: Sequence[Tuple[bool, bool, bool]]) -> dict:
     }
 
 
-def ensure_model(path: str = MODEL_PATH) -> str:
+def ensure_model(path: str = MODEL_PATH, url: str = MODEL_URL, sha256: str = MODEL_SHA256) -> str:
     """Laddar ner modellen första gången och kontrollerar att det är rätt fil."""
     if not os.path.exists(path):
         import urllib.request
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        print(f"Laddar ner handmodellen (4,7 MB) till {path} …")
-        urllib.request.urlretrieve(MODEL_URL, path + ".tmp")
+        print(f"Laddar ner {os.path.basename(path)} till {path} …")
+        urllib.request.urlretrieve(url, path + ".tmp")
         os.replace(path + ".tmp", path)
     with open(path, "rb") as f:
         digest = hashlib.sha256(f.read()).hexdigest()
-    if digest != MODEL_SHA256:
+    if digest != sha256:
         os.remove(path)
         sys.exit(f"❌ {path} är inte den väntade modellen (sha256 {digest[:12]}…). Borttagen, kör igen.")
     return path
@@ -230,10 +265,16 @@ def mosaic_path(name: str = "") -> str:
     return f"logs/handmodell_{name}.jpg" if name else "logs/handmodell.jpg"
 
 
-def report(rows, tiles, ms, scores, path: str = "logs/handmodell.jpg") -> None:
+def above_text(values: Sequence[float], threshold: float) -> str:
+    """'7 av 10 över 0.5', eller '-' om inget finns."""
+    return f"{sum(1 for v in values if v >= threshold)} av {len(values)} över {threshold:g}" if values else "-"
+
+
+def report(rows, tiles, ms, scores, path: str = "logs/handmodell.jpg", lm_threshold: float = 0.5) -> None:
     """
     Sammanfattning och mosaik. Anropas innan kameran stängs (som tools/streckkod.py).
-    rows: [(tid, närmast, hand hela, i rutan hela, hand ruta, i rutan ruta)]. ms och scores: {"hela": [], "ruta": []}.
+    rows: [(tid, närmast, hand hela, i rutan hela, hand ruta, i rutan ruta, landmärke hela, landmärke ruta)].
+    ms och scores: listor per "hela", "ruta", "lm_hela", "lm_ruta" (ms: "hela", "ruta", "lm").
     """
     import cv2
     from tools.streckkod import pick_tiles
@@ -242,24 +283,30 @@ def report(rows, tiles, ms, scores, path: str = "logs/handmodell.jpg") -> None:
     crop = summarize([(r[1], r[4], r[5]) for r in rows])
     rule_whole = share_text(*confirmed_within([(r[0], r[1], r[3]) for r in rows]))
     rule_crop = share_text(*confirmed_within([(r[0], r[1], r[5]) for r in rows]))
-    picked = [tiles[i][0] for i in pick_tiles([odd for _, odd in tiles])]   # där rutan missade först
+    lm_whole = share_text(*confirmed_within([(r[0], r[1], r[6]) for r in rows]))
+    lm_crop = share_text(*confirmed_within([(r[0], r[1], r[7]) for r in rows]))
+    picked = [tiles[i][0] for i in pick_tiles([odd for _, odd in tiles])]   # där landmärkesmodellen fick avgöra först
     while picked and len(picked) % 4:
         picked.append(np.zeros((TILE_H, TILE_W, 3), np.uint8))
     if picked:
         cv2.imwrite(path, np.vstack([np.hstack(picked[i:i + 4]) for i in range(0, len(picked), 4)]),
                     [cv2.IMWRITE_JPEG_QUALITY, 85])
     print(f"\nKlart: {path}. {whole['bilder']} bilder, närmaste föremål (blå) i {whole['narmast']}.")
-    print("  Blå = närmast i djupet. Gul = modellen på hela bilden. Grön = modellen på den utskurna rutan.")
-    print(f"  {'':42}{'Hela bilden':>18}{'Utskuren ruta':>20}")
-    print(f"  {'Hittade en hand':42}{whole['hand']:>18}{crop['hand']:>20}")
-    print(f"  {'Handen i den blå rutan (bekräftad)':42}{whole['bekraftad']:>18}{crop['bekraftad']:>20}")
-    print(f"  {'Bekräftad inom 2 s (regeln för steg B)':42}{rule_whole:>18}{rule_crop:>20}"
+    print("  Blå = närmast i djupet. Gul = handflata, hela bilden. Grön = handflata, utskuren ruta.")
+    print("  Röd ram runt en handflata = landmärkesmodellen säger att det är en hand.")
+    print(f"  {'':44}{'Hela bilden':>18}{'Utskuren ruta':>20}")
+    print(f"  {'Handflata i den blå rutan (per bild)':44}{whole['bekraftad']:>18}{crop['bekraftad']:>20}")
+    print(f"  {'Regeln, bara handflatemodellen':44}{rule_whole:>18}{rule_crop:>20}")
+    print(f"  {'REGELN MED LANDMÄRKESMODELLEN':44}{lm_whole:>18}{lm_crop:>20}"
           "   <- med vara: högt är bra. Utan händer: 0 är bra")
-    print(f"  {'Blå ruta men ingen hand':42}{whole['narmast_utan_hand']:>18}{crop['narmast_utan_hand']:>20}"
-          "   <- annat föremål, eller missad hand? Se mosaiken")
-    print(f"  {'Hand utan blå ruta (falsklarm?)':42}{whole['hand_utan_narmast']:>18}{'-':>20}")
-    print(f"  {'Säkerhet, median (lägsta-högsta)':42}{median_text(scores['hela']):>18}{median_text(scores['ruta']):>20}")
-    print(f"  {'Tid på kameran, ms':42}{median_text(ms['hela'], '{:.0f}'):>18}{median_text(ms['ruta'], '{:.0f}'):>20}")
+    print(f"  {'Landmärkesvärde, median (lägsta-högsta)':44}{median_text(scores['lm_hela']):>18}"
+          f"{median_text(scores['lm_ruta']):>20}")
+    print(f"  {'Landmärkesvärde över gränsen':44}{above_text(scores['lm_hela'], lm_threshold):>18}"
+          f"{above_text(scores['lm_ruta'], lm_threshold):>20}")
+    print(f"  {'Handflatans säkerhet, median':44}{median_text(scores['hela']):>18}{median_text(scores['ruta']):>20}")
+    print(f"  {'Tid på kameran, ms (handflata)':44}{median_text(ms['hela'], '{:.0f}'):>18}"
+          f"{median_text(ms['ruta'], '{:.0f}'):>20}")
+    print(f"  {'Tid på kameran, ms (landmärke, per hand)':44}{median_text(ms['lm'], '{:.0f}'):>18}")
 
 
 def main():
@@ -272,33 +319,38 @@ def main():
     ap = argparse.ArgumentParser(description="Hittar handmodellen handen med varan, och låter den bli annat?")
     ap.add_argument("--1080p", dest="hd", action="store_true", help="1080p i stället för 4K")
     ap.add_argument("--sekunder", type=float, default=60.0)
-    ap.add_argument("--troskel", type=float, default=0.5, help="modellens säkerhet för att räknas som hand (0-1)")
+    ap.add_argument("--troskel", type=float, default=0.5, help="handflatemodellens säkerhet för att räknas (0-1)")
+    ap.add_argument("--lm-troskel", type=float, default=0.5,
+                    help="landmärkesmodellens värde för att räknas som hand (0-1, 0,5 som i referenskoden)")
     ap.add_argument("--namn", default="", help="mosaiken sparas som logs/handmodell_NAMN.jpg (t.ex. vara1, dorr)")
     args = ap.parse_args()
-    if not 0.05 <= args.troskel <= 0.95:
-        sys.exit("--troskel ska ligga mellan 0,05 och 0,95")
+    if not 0.05 <= args.troskel <= 0.95 or not 0.05 <= args.lm_troskel <= 0.95:
+        sys.exit("--troskel och --lm-troskel ska ligga mellan 0,05 och 0,95")
     if args.namn and not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", args.namn):
         sys.exit("--namn får bara innehålla a-z, A-Z, 0-9, - och _ (inga mellanslag eller å/ä/ö)")
     path = mosaic_path(args.namn)
     model = ensure_model()
+    lm_model = ensure_model(LM_PATH, LM_URL, LM_SHA256)
     anchors = palm_anchors()
 
     pipeline = bs.build_pipeline(uhd=not args.hd, hand=True)   # samma kamera som skannern, oförändrad
-    nn = pipeline.create(dai.node.NeuralNetwork)
-    nn.setBlobPath(model)
-    nn.input.setBlocking(True)
-    nn.input.setQueueSize(1)
-    palm_in = pipeline.create(dai.node.XLinkIn)
-    palm_in.setStreamName("palm_in")
-    palm_in.setMaxDataSize(INPUT * INPUT * 3)
-    palm_in.out.link(nn.input)
-    palm_out = pipeline.create(dai.node.XLinkOut)
-    palm_out.setStreamName("palm_out")
-    nn.out.link(palm_out.input)
+    for blob, name, size in ((model, "palm", INPUT), (lm_model, "lm", LM_INPUT)):
+        nn = pipeline.create(dai.node.NeuralNetwork)
+        nn.setBlobPath(blob)
+        nn.input.setBlocking(True)
+        nn.input.setQueueSize(1)
+        xin = pipeline.create(dai.node.XLinkIn)
+        xin.setStreamName(f"{name}_in")
+        xin.setMaxDataSize(size * size * 3)
+        xin.out.link(nn.input)
+        xout = pipeline.create(dai.node.XLinkOut)
+        xout.setStreamName(f"{name}_out")
+        nn.out.link(xout.input)
 
     os.makedirs("logs", exist_ok=True)
     rows, tiles = [], []
-    ms, scores = {"hela": [], "ruta": []}, {"hela": [], "ruta": []}
+    ms = {"hela": [], "ruta": [], "lm": []}
+    scores = {"hela": [], "ruta": [], "lm_hela": [], "lm_ruta": []}
     print(f"Startar kameran i {'1080p' if args.hd else '4K'}. Mosaiken sparas i {path}.")
     reported = False
     try:
@@ -306,22 +358,37 @@ def main():
             q = device.getOutputQueue(name="out", maxSize=4, blocking=False)
             q_in = device.getInputQueue("palm_in")
             q_out = device.getOutputQueue("palm_out", maxSize=1, blocking=True)
+            q_lm_in = device.getInputQueue("lm_in")
+            q_lm_out = device.getOutputQueue("lm_out", maxSize=1, blocking=True)
             control = device.getInputQueue("control")
             focus = HandFocus()
 
-            def find_palms(square, kind):
-                """Kör modellen på en kvadratisk bild (128 x 128, BGR). Rutor 0-1 i den bilden."""
+            def send(queue, square, size):
                 frame = dai.ImgFrame()
                 frame.setType(dai.ImgFrame.Type.BGR888p)
-                frame.setWidth(INPUT)
-                frame.setHeight(INPUT)
+                frame.setWidth(size)
+                frame.setHeight(size)
                 frame.setData(square.transpose(2, 0, 1).flatten())
+                queue.send(frame)
+
+            def find_palms(square, kind):
+                """Handflatemodellen på en kvadratisk bild (128 x 128, BGR). Rutor 0-1 i den bilden."""
                 t = time.perf_counter()
-                q_in.send(frame)
+                send(q_in, square, INPUT)
                 out = q_out.get()
                 ms[kind].append((time.perf_counter() - t) * 1000)
                 return non_max_suppression(decode_palms(out.getLayerFp16("classificators"),
                                                         out.getLayerFp16("regressors"), anchors, args.troskel))
+
+            def hand_score(color, palm, ox, oy, side):
+                """Landmärkesmodellen på handrutan, utskuren ur 4K-bilden: värdet för 'det här är en hand'."""
+                pts = hand_rect(palm, ox, oy, side)
+                mat = cv2.getAffineTransform(np.float32(pts[1:]), np.float32([(0, 0), (LM_INPUT, 0), (LM_INPUT, LM_INPUT)]))
+                t = time.perf_counter()
+                send(q_lm_in, cv2.warpAffine(color, mat, (LM_INPUT, LM_INPUT)), LM_INPUT)
+                out = q_lm_out.get()
+                ms["lm"].append((time.perf_counter() - t) * 1000)
+                return float(out.getLayerFp16("Identity_1")[0]), pts
 
             t0 = last = time.time()
             try:
@@ -342,46 +409,62 @@ def main():
                     h, top, bottom = letterbox_rows(W, H)
                     small = cv2.copyMakeBorder(cv2.resize(color, (INPUT, h), interpolation=cv2.INTER_AREA),
                                                top, bottom, 0, 0, cv2.BORDER_CONSTANT)
-                    whole = [square_to_frame(p, W, H) for p in find_palms(small, "hela")]
-                    scores["hela"] += [p.score for p in whole]
-                    ok_whole = region is not None and any(overlaps(region, p) for p in whole)
+                    found = {"hela": [(p, square_to_frame(p, W, H)) for p in find_palms(small, "hela")],
+                             "ruta": []}
+                    where = {"hela": (0, -(W - H) / 2, W)}        # kvadratens hörn och sida i 4K-bilden
 
                     # 2. Bara den blå rutan, utskuren som en kvadrat och förstorad
-                    crop, box = [], None
                     if region is not None:
                         box = square_crop(region, W, H)
                         x, y, side = box
                         part = cv2.resize(color[y:y + side, x:x + side], (INPUT, INPUT), interpolation=cv2.INTER_AREA)
-                        crop = [crop_to_frame(p, box, W, H) for p in find_palms(part, "ruta")]
-                        scores["ruta"] += [p.score for p in crop]
-                    ok_crop = region is not None and any(overlaps(region, p) for p in crop)
-                    rows.append((now, region is not None, bool(whole), ok_whole, bool(crop), ok_crop))
+                        found["ruta"] = [(p, crop_to_frame(p, box, W, H)) for p in find_palms(part, "ruta")]
+                        where["ruta"] = box
+
+                    # 3. Landmärkesmodellen avgör för handflatorna i den blå rutan
+                    ok, lm_ok, rects = {}, {}, []
+                    for kind in ("hela", "ruta"):
+                        scores[kind] += [fr.score for _, fr in found[kind]]
+                        inside = [(sq, fr) for sq, fr in found[kind] if region is not None and overlaps(region, fr)]
+                        ok[kind] = bool(inside)
+                        lm_ok[kind] = False
+                        for sq, fr in inside[:2]:
+                            value, pts = hand_score(color, sq, *where[kind])
+                            scores[f"lm_{kind}"].append(value)
+                            if value >= args.lm_troskel:
+                                lm_ok[kind] = True
+                                rects.append(pts)
+                    rows.append((now, region is not None, bool(found["hela"]), ok["hela"], bool(found["ruta"]),
+                                 ok["ruta"], lm_ok["hela"], lm_ok["ruta"]))
 
                     if now - t0 >= 3 and len(tiles) < 200:           # efter uppstarten, högst 200 bilder
                         img = color.copy()
                         if region is not None:
                             rx, ry, rw, rh = region.to_pixels(W, H)
                             cv2.rectangle(img, (rx, ry), (rx + rw, ry + rh), (255, 128, 0), 8)
-                        for p in whole:                              # gul, tunn: hela bilden
-                            cv2.rectangle(img, (int(p.x0 * W), int(p.y0 * H)), (int(p.x1 * W), int(p.y1 * H)), (0, 230, 255), 6)
-                        for p in crop:                               # grön, tjock: utskuren ruta
-                            cv2.rectangle(img, (int(p.x0 * W), int(p.y0 * H)), (int(p.x1 * W), int(p.y1 * H)), (0, 220, 0), 12)
-                        def said(palms):
-                            return f"JA {max(p.score for p in palms):.2f}" if palms else "nej"
-                        text = f"blå: {'JA' if region else 'nej'} | hela: {said(whole)} | ruta: {said(crop)}"
+                        for kind, colour, thick in (("hela", (0, 230, 255), 6), ("ruta", (0, 220, 0), 12)):
+                            for _, p in found[kind]:              # gul: hela bilden, grön: utskuren ruta
+                                cv2.rectangle(img, (int(p.x0 * W), int(p.y0 * H)), (int(p.x1 * W), int(p.y1 * H)),
+                                              colour, thick)
+                        for pts in rects:                         # röd: landmärkesmodellen säger hand
+                            cv2.polylines(img, [np.int32(pts)], True, (0, 0, 255), 14)
+                        def said(kind):
+                            if not found[kind]:
+                                return "nej"
+                            return f"JA {max(fr.score for _, fr in found[kind]):.2f}{' HAND' if lm_ok[kind] else ''}"
+                        text = f"blå: {'JA' if region else 'nej'} | hela: {said('hela')} | ruta: {said('ruta')}"
                         tile = cv2.resize(img, (TILE_W, TILE_H))
-                        cv2.putText(tile, text.replace("å", "a"), (8, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
-                        odd = (region is not None and not ok_crop) or ok_whole != ok_crop   # rutan missade, eller oense
-                        tiles.append((tile, odd))
+                        cv2.putText(tile, text.replace("å", "a"), (8, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                        tiles.append((tile, ok["hela"] or ok["ruta"]))   # handflata i blå rutan: landmärket avgjorde
                         print(f"  {now - t0:5.1f} s  {text}")
             except KeyboardInterrupt:
                 print("\nAvbruten: sammanfattar det som hann samlas in.")
-            report(rows, tiles, ms, scores, path)   # före stängningen, som kan ta några sekunder
+            report(rows, tiles, ms, scores, path, args.lm_troskel)   # före stängningen, som kan ta några sekunder
             reported = True
             print("Stänger kameran …")
     except KeyboardInterrupt:
         if not reported:
-            report(rows, tiles, ms, scores, path)
+            report(rows, tiles, ms, scores, path, args.lm_troskel)
 
 
 if __name__ == "__main__":
