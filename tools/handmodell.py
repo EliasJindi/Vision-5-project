@@ -30,140 +30,24 @@
 # 2026-11-09 (Elias: "försök köra om med krympningen"): handrutan krymptes 3-5 gånger direkt ur 4K med
 #   warpAffine, som tar enstaka pixlar, och handen blev kornig. Nu förminskas bilden med medelvärden
 #   först (shrink_factor), så att rutan högst halveras av warpAffine.
+# 2026-11-09 (steg B): modellernas funktioner ligger nu i hand_model.py, som skannern också använder.
 # =========================================================================
 import argparse
-import hashlib
-import math
 import os
 import re
 import sys
 import time
-from dataclasses import dataclass
-from typing import List, Sequence, Tuple
+from typing import Sequence, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # projektets rot
 
 import numpy as np   # noqa: E402  (efter sökvägen ovan, som de andra verktygen)
 
-MODEL_PATH = "models/palm_detection_sh4.blob"
-MODEL_URL = "https://raw.githubusercontent.com/geaxgx/depthai_hand_tracker/main/models/palm_detection_sh4.blob"
-MODEL_SHA256 = "4d45ecfddc68d8365fef3cb633d78b916612f25f7a48898f90f8a47d4b151aa5"
-INPUT = 128           # modellens bild: 128 x 128
-# Steg 2 i MediaPipe (väg B, Elias 9/11): landmärkesmodellen (21 punkter på handen) bekräftar en handflata
-# med ett eget värde för "det här är en hand". Lätta versionen, standard i referenskoden.
-LM_PATH = "models/hand_landmark_lite_sh4.blob"
-LM_URL = "https://raw.githubusercontent.com/geaxgx/depthai_hand_tracker/main/models/hand_landmark_lite_sh4.blob"
-LM_SHA256 = "98f2e9642099a572c96e80af944212efec199cdea1995ef391fab0d3a9da45fd"
-LM_INPUT = 224        # landmärkesmodellens bild: 224 x 224
+import hand_model   # noqa: E402
+from hand_model import (INPUT, LM_INPUT, LM_PATH, LM_SHA256, LM_URL, Palm, decode_palms, hand_rect,  # noqa: E402
+                        letterbox_rows, non_max_suppression, overlaps, palm_anchors, shrink_factor, square_to_frame)
+
 TILE_W, TILE_H = 480, 270
-
-
-@dataclass(frozen=True)
-class Palm:
-    """En handflata som modellen hittat. Koordinater 0-1 i den bild de gäller (se square_to_frame)."""
-    score: float
-    x0: float
-    y0: float
-    x1: float
-    y1: float
-    kps: Tuple[Tuple[float, float], ...] = ()   # 7 punkter (0 = handleden, 2 = långfingrets knoge)
-
-
-def palm_anchors(size: int = INPUT) -> np.ndarray:
-    """
-    Mitten (x, y) på modellens 896 ankarrutor, i samma ordning som modellens utdata. MediaPipe:
-    4 lager med steg 8, 16, 16, 16 och 2 rutor per lager och cell (fast storlek 1x1). Lagren med
-    samma steg slås ihop: 16x16 celler x 2 + 8x8 celler x 6 = 512 + 384 = 896.
-    """
-    anchors = []
-    for stride, per_cell in ((8, 2), (16, 6)):
-        cells = math.ceil(size / stride)
-        for y in range(cells):
-            for x in range(cells):
-                anchors += [((x + 0.5) / cells, (y + 0.5) / cells)] * per_cell
-    return np.array(anchors, dtype=np.float32)
-
-
-def decode_palms(scores: Sequence[float], regressors: Sequence[float], anchors: np.ndarray,
-                 threshold: float = 0.5, size: int = INPUT) -> List[Palm]:
-    """
-    Modellens utdata till rutor (0-1 i den kvadratiska bilden). scores: 896 råvärden (före sigmoid).
-    regressors: 896 x 18 (mitt x, mitt y, bredd, höjd i pixlar relativt ankaret, sedan 7 punkter).
-    """
-    raw = np.clip(np.asarray(scores, dtype=np.float32).reshape(-1), -100, 100)   # som MediaPipe
-    prob = 1 / (1 + np.exp(-raw))
-    reg = np.asarray(regressors, dtype=np.float32).reshape(len(anchors), -1)
-    palms = []
-    for i in np.nonzero(prob > threshold)[0]:
-        cx = reg[i, 0] / size + anchors[i, 0]
-        cy = reg[i, 1] / size + anchors[i, 1]
-        w, h = reg[i, 2] / size, reg[i, 3] / size
-        if w <= 0 or h <= 0:
-            continue
-        kps = tuple((float(reg[i, 4 + 2 * k] / size + anchors[i, 0]), float(reg[i, 5 + 2 * k] / size + anchors[i, 1]))
-                    for k in range(7))
-        palms.append(Palm(float(prob[i]), float(cx - w / 2), float(cy - h / 2), float(cx + w / 2), float(cy + h / 2), kps))
-    return palms
-
-
-def hand_rect(palm: Palm, ox: float, oy: float, side: float, scale: float = 2.6,
-              shift_y: float = -0.5) -> List[Tuple[float, float]]:
-    """
-    Handrutan som landmärkesmodellen ska se, som fyra hörn i kamerabildens pixlar. palm är i den
-    kvadratiska modellbilden (0-1); kvadratens övre vänstra hörn ligger på (ox, oy) och sidan är side
-    pixlar i kamerabilden. Som MediaPipes palm_detection_detection_to_roi: vriden så att handleden är
-    nere och långfingret uppe, flyttad en halv handflata mot fingrarna, scale gånger handflatans
-    längsta sida. Hörnen: [nere vänster, uppe vänster, uppe höger, nere höger] i handens riktning.
-    """
-    (x0, y0), (x2, y2) = palm.kps[0], palm.kps[2]
-    rotation = math.pi / 2 - math.atan2(-(y2 - y0), x2 - x0)
-    rotation = rotation - 2 * math.pi * math.floor((rotation + math.pi) / (2 * math.pi))
-    w, h = (palm.x1 - palm.x0) * side, (palm.y1 - palm.y0) * side
-    cx = ox + (palm.x0 + palm.x1) / 2 * side - h * shift_y * math.sin(rotation)
-    cy = oy + (palm.y0 + palm.y1) / 2 * side + h * shift_y * math.cos(rotation)
-    size = max(w, h) * scale
-    b, a = math.cos(rotation) * 0.5, math.sin(rotation) * 0.5
-    p0 = (cx - a * size - b * size, cy + b * size - a * size)
-    p1 = (cx + a * size - b * size, cy - b * size - a * size)
-    return [p0, p1, (2 * cx - p0[0], 2 * cy - p0[1]), (2 * cx - p1[0], 2 * cy - p1[1])]
-
-
-def iou(a: Palm, b: Palm) -> float:
-    ix = max(0.0, min(a.x1, b.x1) - max(a.x0, b.x0))
-    iy = max(0.0, min(a.y1, b.y1) - max(a.y0, b.y0))
-    inter = ix * iy
-    union = (a.x1 - a.x0) * (a.y1 - a.y0) + (b.x1 - b.x0) * (b.y1 - b.y0) - inter
-    return inter / union if union > 0 else 0.0
-
-
-def non_max_suppression(palms: List[Palm], overlap: float = 0.3, keep: int = 2) -> List[Palm]:
-    """Bästa rutan per hand: rutor som täcker en bättre till mer än overlap tas bort. Högst keep händer."""
-    kept: List[Palm] = []
-    for p in sorted(palms, key=lambda p: -p.score):
-        if all(iou(p, k) <= overlap for k in kept):
-            kept.append(p)
-        if len(kept) == keep:
-            break
-    return kept
-
-
-def square_to_frame(palm: Palm, width: int, height: int) -> Palm:
-    """
-    Från den kvadratiska modellbilden till kamerabilden (0-1). Kamerabilden (bredare än hög) läggs
-    i mitten av kvadraten med svarta kanter över och under, se letterbox().
-    """
-    pad = (width - height) / 2 / width          # kanten ovanför, som andel av kvadratens sida
-    scale = width / height                      # en enhet i kvadraten = så många bildhöjder
-    def y(v: float) -> float:
-        return min(1.0, max(0.0, (v - pad) * scale))
-    return Palm(palm.score, min(1.0, max(0.0, palm.x0)), y(palm.y0), min(1.0, max(0.0, palm.x1)), y(palm.y1))
-
-
-def letterbox_rows(width: int, height: int, size: int = INPUT) -> Tuple[int, int, int]:
-    """(bildens höjd i modellbilden, svart kant över, svart kant under) för en bild width x height."""
-    h = round(size * height / width)
-    top = (size - h) // 2
-    return h, top, size - h - top
 
 
 def square_crop(region, width: int, height: int, margin: float = 0.15, min_share: float = 0.2) -> Tuple[int, int, int]:
@@ -191,19 +75,6 @@ def crop_to_frame(palm: Palm, box: Tuple[int, int, int], width: int, height: int
     return Palm(palm.score, fx(palm.x0), fy(palm.y0), fx(palm.x1), fy(palm.y1))
 
 
-def overlaps(region, palm: Palm, margin: float = 0.05, share: float = 0.25) -> bool:
-    """
-    Ligger handen i den blå rutan (hand_region.NearRegion)? Minst share av handens ruta ska ligga
-    inom den blå rutan, utökad med margin (handen kan sticka ut lite bakom varan).
-    """
-    x0, y0 = region.x0 - margin, region.y0 - margin
-    x1, y1 = region.x1 + margin, region.y1 + margin
-    ix = max(0.0, min(x1, palm.x1) - max(x0, palm.x0))
-    iy = max(0.0, min(y1, palm.y1) - max(y0, palm.y0))
-    area = (palm.x1 - palm.x0) * (palm.y1 - palm.y0)
-    return area > 0 and ix * iy / area >= share
-
-
 def summarize(rows: Sequence[Tuple[bool, bool, bool]]) -> dict:
     """rows: [(närmast hittat, hand hittad, handen i närmast-rutan)] per bild."""
     return {
@@ -217,20 +88,13 @@ def summarize(rows: Sequence[Tuple[bool, bool, bool]]) -> dict:
     }
 
 
-def ensure_model(path: str = MODEL_PATH, url: str = MODEL_URL, sha256: str = MODEL_SHA256) -> str:
-    """Laddar ner modellen första gången och kontrollerar att det är rätt fil."""
-    if not os.path.exists(path):
-        import urllib.request
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        print(f"Laddar ner {os.path.basename(path)} till {path} …")
-        urllib.request.urlretrieve(url, path + ".tmp")
-        os.replace(path + ".tmp", path)
-    with open(path, "rb") as f:
-        digest = hashlib.sha256(f.read()).hexdigest()
-    if digest != sha256:
-        os.remove(path)
-        sys.exit(f"❌ {path} är inte den väntade modellen (sha256 {digest[:12]}…). Borttagen, kör igen.")
-    return path
+def ensure_model(path: str = hand_model.MODEL_PATH, url: str = hand_model.MODEL_URL,
+                 sha256: str = hand_model.MODEL_SHA256) -> str:
+    """Laddar ner modellen första gången (hand_model.ensure_model) och avbryter med en förklaring om den är fel."""
+    try:
+        return hand_model.ensure_model(path, url, sha256, download=True)
+    except hand_model.ModelError as e:
+        sys.exit(f"❌ {e}. Borttagen, kör igen.")
 
 
 def median_text(values: Sequence[float], fmt: str = "{:.2f}") -> str:
@@ -266,16 +130,6 @@ def share_text(part: int, total: int) -> str:
 def mosaic_path(name: str = "") -> str:
     """logs/handmodell.jpg, eller logs/handmodell_<namn>.jpg så att körningarna inte skriver över varandra."""
     return f"logs/handmodell_{name}.jpg" if name else "logs/handmodell.jpg"
-
-
-def shrink_factor(pts: Sequence[Tuple[float, float]], size: int = LM_INPUT) -> int:
-    """
-    Hur många gånger kamerabilden ska förminskas (med medelvärden) innan handrutan skärs ut, så att
-    rutan blir mellan size och 2 x size pixlar. warpAffine tar enstaka pixlar: krymper den en 4K-ruta
-    3-5 gånger direkt blir handen kornig (körningen vara1_lm 9/11: riktiga händer median 0,30).
-    """
-    side = math.dist(pts[1], pts[2])
-    return max(1, int(side // size))
 
 
 def above_text(values: Sequence[float], threshold: float) -> str:

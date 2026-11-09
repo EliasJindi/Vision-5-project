@@ -3,9 +3,10 @@ import unittest
 import numpy as np
 
 from hand_region import NearRegion
-from tools.handmodell import (Palm, above_text, confirmed_within, crop_to_frame, decode_palms, hand_rect, iou,
-                              letterbox_rows, median_text, mosaic_path, non_max_suppression, overlaps, palm_anchors,
-                              share_text, shrink_factor, square_crop, square_to_frame, summarize)
+from hand_model import (Palm, decode_palms, hand_rect, iou, letterbox_rows, non_max_suppression, overlaps,
+                        palm_anchors, shrink_factor, square_to_frame)
+from tools.handmodell import (above_text, confirmed_within, crop_to_frame, median_text, mosaic_path, share_text,
+                              square_crop, summarize)
 
 
 def logit(p):
