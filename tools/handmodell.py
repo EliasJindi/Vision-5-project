@@ -7,6 +7,7 @@
 # och ligger handen i den blå rutan? Ändrar ingenting i skannern. Avgör om steg B (bygga in den) lönar sig.
 #   python3 tools/handmodell.py                 (4K, 60 s)
 #   clear && sleep 15 && python3 tools/handmodell.py --sekunder 60
+#   clear && sleep 5 && python3 tools/handmodell.py --sekunder 40 --namn dorr   (egen mosaik per körning)
 # Gör så här under körningen: håll fram olika varor som vanligt, men sänk också handen ibland så att
 # något annat är närmast (bordet, dörren). Då syns både om modellen hittar handen med varan, och om
 # den låter bli när det inte är en hand. Ctrl+C avslutar och sammanfattar.
@@ -20,11 +21,14 @@
 #   hjälper att skära ut området runt handen. Därför körs modellen nu två gånger per bild: på hela bilden
 #   (som förut) och på den blå rutan, utskuren som en kvadrat och förstorad (square_crop). Sammanfattningen
 #   jämför dem. Djupet säger VAR handen troligen är, modellen avgör OM det är en hand.
+# 2026-11-09 (Elias: "är du säker på att det är pga konsekventa saker?"): --namn ger en mosaik per körning,
+#   och sammanfattningen visar regeln för steg B direkt: blå ruta bekräftad om en hand setts i den inom 2 s.
 # =========================================================================
 import argparse
 import hashlib
 import math
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -199,27 +203,58 @@ def median_text(values: Sequence[float], fmt: str = "{:.2f}") -> str:
     return f"{fmt.format(v[len(v) // 2])} ({fmt.format(v[0])}-{fmt.format(v[-1])})"
 
 
-def report(rows, tiles, ms, scores) -> None:
+def confirmed_within(rows: Sequence[Tuple[float, bool, bool]], window: float = 2.0) -> Tuple[int, int]:
+    """
+    Regeln som föreslås för skannern (steg B): den blå rutan räknas som en hand om modellen har hittat
+    en hand i den någon gång de senaste window sekunderna (den här bilden medräknad).
+    rows: [(tid, blå ruta finns, hand i den blå rutan)] i tidsordning. Returnerar (bekräftade, blå rutor).
+    """
+    last_ok, confirmed, total = float("-inf"), 0, 0
+    for t, near, ok in rows:
+        if near and ok:
+            last_ok = t
+        if near:
+            total += 1
+            if t - last_ok <= window:
+                confirmed += 1
+    return confirmed, total
+
+
+def share_text(part: int, total: int) -> str:
+    """'7 av 10 (70 %)', eller '-' om total är 0."""
+    return f"{part} av {total} ({round(100 * part / total)} %)" if total else "-"
+
+
+def mosaic_path(name: str = "") -> str:
+    """logs/handmodell.jpg, eller logs/handmodell_<namn>.jpg så att körningarna inte skriver över varandra."""
+    return f"logs/handmodell_{name}.jpg" if name else "logs/handmodell.jpg"
+
+
+def report(rows, tiles, ms, scores, path: str = "logs/handmodell.jpg") -> None:
     """
     Sammanfattning och mosaik. Anropas innan kameran stängs (som tools/streckkod.py).
-    rows: [(närmast, hand hela, i rutan hela, hand ruta, i rutan ruta)]. ms och scores: {"hela": [], "ruta": []}.
+    rows: [(tid, närmast, hand hela, i rutan hela, hand ruta, i rutan ruta)]. ms och scores: {"hela": [], "ruta": []}.
     """
     import cv2
     from tools.streckkod import pick_tiles
     os.makedirs("logs", exist_ok=True)
-    whole = summarize([(r[0], r[1], r[2]) for r in rows])
-    crop = summarize([(r[0], r[3], r[4]) for r in rows])
+    whole = summarize([(r[1], r[2], r[3]) for r in rows])
+    crop = summarize([(r[1], r[4], r[5]) for r in rows])
+    rule_whole = share_text(*confirmed_within([(r[0], r[1], r[3]) for r in rows]))
+    rule_crop = share_text(*confirmed_within([(r[0], r[1], r[5]) for r in rows]))
     picked = [tiles[i][0] for i in pick_tiles([odd for _, odd in tiles])]   # där rutan missade först
     while picked and len(picked) % 4:
         picked.append(np.zeros((TILE_H, TILE_W, 3), np.uint8))
     if picked:
-        cv2.imwrite("logs/handmodell.jpg", np.vstack([np.hstack(picked[i:i + 4]) for i in range(0, len(picked), 4)]),
+        cv2.imwrite(path, np.vstack([np.hstack(picked[i:i + 4]) for i in range(0, len(picked), 4)]),
                     [cv2.IMWRITE_JPEG_QUALITY, 85])
-    print(f"\nKlart: logs/handmodell.jpg. {whole['bilder']} bilder, närmaste föremål (blå) i {whole['narmast']}.")
+    print(f"\nKlart: {path}. {whole['bilder']} bilder, närmaste föremål (blå) i {whole['narmast']}.")
     print("  Blå = närmast i djupet. Gul = modellen på hela bilden. Grön = modellen på den utskurna rutan.")
     print(f"  {'':42}{'Hela bilden':>18}{'Utskuren ruta':>20}")
     print(f"  {'Hittade en hand':42}{whole['hand']:>18}{crop['hand']:>20}")
     print(f"  {'Handen i den blå rutan (bekräftad)':42}{whole['bekraftad']:>18}{crop['bekraftad']:>20}")
+    print(f"  {'Bekräftad inom 2 s (regeln för steg B)':42}{rule_whole:>18}{rule_crop:>20}"
+          "   <- med vara: högt är bra. Utan händer: 0 är bra")
     print(f"  {'Blå ruta men ingen hand':42}{whole['narmast_utan_hand']:>18}{crop['narmast_utan_hand']:>20}"
           "   <- annat föremål, eller missad hand? Se mosaiken")
     print(f"  {'Hand utan blå ruta (falsklarm?)':42}{whole['hand_utan_narmast']:>18}{'-':>20}")
@@ -238,9 +273,13 @@ def main():
     ap.add_argument("--1080p", dest="hd", action="store_true", help="1080p i stället för 4K")
     ap.add_argument("--sekunder", type=float, default=60.0)
     ap.add_argument("--troskel", type=float, default=0.5, help="modellens säkerhet för att räknas som hand (0-1)")
+    ap.add_argument("--namn", default="", help="mosaiken sparas som logs/handmodell_NAMN.jpg (t.ex. vara1, dorr)")
     args = ap.parse_args()
     if not 0.05 <= args.troskel <= 0.95:
         sys.exit("--troskel ska ligga mellan 0,05 och 0,95")
+    if args.namn and not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", args.namn):
+        sys.exit("--namn får bara innehålla a-z, A-Z, 0-9, - och _ (inga mellanslag eller å/ä/ö)")
+    path = mosaic_path(args.namn)
     model = ensure_model()
     anchors = palm_anchors()
 
@@ -260,7 +299,7 @@ def main():
     os.makedirs("logs", exist_ok=True)
     rows, tiles = [], []
     ms, scores = {"hela": [], "ruta": []}, {"hela": [], "ruta": []}
-    print("Startar kameran. Håll fram varor som vanligt, och sänk handen ibland så att något annat är närmast.")
+    print(f"Startar kameran i {'1080p' if args.hd else '4K'}. Mosaiken sparas i {path}.")
     reported = False
     try:
         with dai.Device(pipeline) as device:
@@ -316,7 +355,7 @@ def main():
                         crop = [crop_to_frame(p, box, W, H) for p in find_palms(part, "ruta")]
                         scores["ruta"] += [p.score for p in crop]
                     ok_crop = region is not None and any(overlaps(region, p) for p in crop)
-                    rows.append((region is not None, bool(whole), ok_whole, bool(crop), ok_crop))
+                    rows.append((now, region is not None, bool(whole), ok_whole, bool(crop), ok_crop))
 
                     if now - t0 >= 3 and len(tiles) < 200:           # efter uppstarten, högst 200 bilder
                         img = color.copy()
@@ -337,12 +376,12 @@ def main():
                         print(f"  {now - t0:5.1f} s  {text}")
             except KeyboardInterrupt:
                 print("\nAvbruten: sammanfattar det som hann samlas in.")
-            report(rows, tiles, ms, scores)   # före stängningen, som kan ta några sekunder
+            report(rows, tiles, ms, scores, path)   # före stängningen, som kan ta några sekunder
             reported = True
             print("Stänger kameran …")
     except KeyboardInterrupt:
         if not reported:
-            report(rows, tiles, ms, scores)
+            report(rows, tiles, ms, scores, path)
 
 
 if __name__ == "__main__":
