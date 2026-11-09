@@ -3,9 +3,9 @@ import unittest
 import numpy as np
 
 from hand_region import NearRegion
-from tools.handmodell import (Palm, confirmed_within, crop_to_frame, decode_palms, iou, letterbox_rows, median_text,
-                              mosaic_path, non_max_suppression, overlaps, palm_anchors, share_text, square_crop,
-                              square_to_frame, summarize)
+from tools.handmodell import (Palm, above_text, confirmed_within, crop_to_frame, decode_palms, hand_rect, iou,
+                              letterbox_rows, median_text, mosaic_path, non_max_suppression, overlaps, palm_anchors,
+                              share_text, square_crop, square_to_frame, summarize)
 
 
 def logit(p):
@@ -42,6 +42,20 @@ class DecodeTest(unittest.TestCase):
         self.assertAlmostEqual(p.x1, cx + 0.1 + 0.125, places=5)
         self.assertAlmostEqual(p.y0, cy - 0.05 - 0.1, places=5)
         self.assertAlmostEqual(p.y1, cy - 0.05 + 0.1, places=5)
+
+    def test_the_seven_points_follow_the_anchor(self):
+        self.scores[600] = logit(0.9)
+        self.reg[600, :4] = (0.0, 0.0, 32.0, 32.0)
+        self.reg[600, 4:6] = (12.8, 25.6)                               # handleden
+        self.reg[600, 8:10] = (-6.4, -12.8)                             # långfingrets knoge
+        (p,) = decode_palms(self.scores, self.reg, self.anchors)
+        cx, cy = self.anchors[600]
+        self.assertEqual(len(p.kps), 7)
+        self.assertAlmostEqual(p.kps[0][0], cx + 0.1, places=5)
+        self.assertAlmostEqual(p.kps[0][1], cy + 0.2, places=5)
+        self.assertAlmostEqual(p.kps[2][0], cx - 0.05, places=5)
+        self.assertAlmostEqual(p.kps[2][1], cy - 0.1, places=5)
+        self.assertAlmostEqual(p.kps[1][0], cx, places=5)                # inga värden: ankarets mitt
 
     def test_threshold_and_broken_boxes(self):
         self.scores[10] = logit(0.45)                                    # under 0,5
@@ -169,6 +183,38 @@ class RuleTest(unittest.TestCase):
         self.assertEqual(share_text(0, 0), "-")
         self.assertEqual(mosaic_path(), "logs/handmodell.jpg")
         self.assertEqual(mosaic_path("dorr"), "logs/handmodell_dorr.jpg")
+
+
+class HandRectTest(unittest.TestCase):
+    @staticmethod
+    def palm(wrist, middle):
+        return Palm(0.9, 0.4, 0.4, 0.6, 0.6, (wrist, (0.5, 0.5), middle, (0, 0), (0, 0), (0, 0), (0, 0)))
+
+    def assertPoints(self, got, want):
+        for g, w in zip(got, want):
+            self.assertAlmostEqual(g[0], w[0], places=4)
+            self.assertAlmostEqual(g[1], w[1], places=4)
+
+    def test_an_upright_hand_is_moved_towards_the_fingers_and_enlarged(self):
+        # handleden nere, långfingret uppe: ingen vridning. Handflatan 20 px, rutan 2,6 x 20 = 52 px,
+        # mitten en halv handflata (10 px) uppåt.
+        pts = hand_rect(self.palm((0.5, 0.6), (0.5, 0.4)), 0, 0, 100)
+        self.assertPoints(pts, [(24, 66), (24, 14), (76, 14), (76, 66)])   # nere v, uppe v, uppe h, nere h
+
+    def test_a_hand_pointing_right_is_turned(self):
+        # fingrarna åt höger: mitten flyttas åt höger, och bildens "uppe" (hörn 1 -> 2) är högerkanten
+        pts = hand_rect(self.palm((0.4, 0.5), (0.6, 0.5)), 0, 0, 100)
+        self.assertPoints(pts, [(34, 24), (86, 24), (86, 76), (34, 76)])
+
+    def test_the_square_is_placed_in_the_camera_image(self):
+        moved = hand_rect(self.palm((0.5, 0.6), (0.5, 0.4)), 10, -20, 100)
+        self.assertPoints(moved, [(34, 46), (34, -6), (86, -6), (86, 46)])
+        big = hand_rect(self.palm((0.5, 0.6), (0.5, 0.4)), 0, 0, 200)
+        self.assertPoints(big, [(48, 132), (48, 28), (152, 28), (152, 132)])
+
+    def test_above_text(self):
+        self.assertEqual(above_text([0.1, 0.6, 0.95], 0.5), "2 av 3 över 0.5")
+        self.assertEqual(above_text([], 0.5), "-")
 
 
 if __name__ == "__main__":
