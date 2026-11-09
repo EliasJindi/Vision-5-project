@@ -5,7 +5,7 @@ import numpy as np
 from hand_region import NearRegion
 from tools.handmodell import (Palm, above_text, confirmed_within, crop_to_frame, decode_palms, hand_rect, iou,
                               letterbox_rows, median_text, mosaic_path, non_max_suppression, overlaps, palm_anchors,
-                              share_text, square_crop, square_to_frame, summarize)
+                              share_text, shrink_factor, square_crop, square_to_frame, summarize)
 
 
 def logit(p):
@@ -215,6 +215,24 @@ class HandRectTest(unittest.TestCase):
     def test_above_text(self):
         self.assertEqual(above_text([0.1, 0.6, 0.95], 0.5), "2 av 3 över 0.5")
         self.assertEqual(above_text([], 0.5), "-")
+
+
+class ShrinkTest(unittest.TestCase):
+    def test_the_hand_box_ends_up_between_one_and_two_model_sizes(self):
+        def box(side):
+            return [(0, side), (0, 0), (side, 0), (side, side)]
+        self.assertEqual(shrink_factor(box(200)), 1)                     # mindre än modellen: ingen förminskning
+        self.assertEqual(shrink_factor(box(447)), 1)
+        self.assertEqual(shrink_factor(box(448)), 2)
+        self.assertEqual(shrink_factor(box(1000)), 4)                    # 250 px kvar
+        self.assertEqual(shrink_factor(box(2000)), 8)
+        for side in range(100, 3000, 37):
+            k = shrink_factor(box(side))
+            self.assertTrue(side / k < 2 * 224 and (k == 1 or side / k >= 224), side)
+
+    def test_a_turned_box_uses_its_side_not_its_width(self):
+        d = 1000 / 2 ** 0.5                                              # 1000 px sida, vriden 45 grader
+        self.assertEqual(shrink_factor([(0, 0), (0, 0), (d, d), (0, 0)]), 4)
 
 
 if __name__ == "__main__":
