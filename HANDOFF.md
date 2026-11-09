@@ -284,6 +284,11 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 4. Hållare med fast vinkel ca 20° nedåt. Kameran pekade för högt i flera körningar även 7–9/11.
 5. **Examensarbetet:** kandidatexamen i Informatik (GIK28T, 15 hp), vecka 13–22 våren 2027, på plats. Frågeställning: "Hur kan djupseende, streckkodsläsning och röstvägledning kombineras för att en person utan syn självständigt ska kunna identifiera varor vid matinköp?" Före kursstart: handledare, metod (design science föreslagen), litteraturstudie, forskningsetik och test med frivilliga blinda och gravt synskadade (Elias: "jag tänker inte blunda och låtsas som att det räcker").
 
+**Idéer som inte är byggda (samlade 9/11).** Finns sedan tidigare: Gemini hittar rätt vara bland liknande (punkt 6 under 7/11), Gemini som reserv när ingen kod syns, t.ex. "vänd paketet" (punkt 8 nedan), rösten guidar efter handen även utan kod ("Lyft varan lite."), hyllkantsetiketter, en AI-agent med verktyg, hållare med fast vinkel (CAD). Nya:
+- **Zoom:** när detektorn ser en kod som inte går att läsa skärs den ut, förstoras 2 gånger och läses igen. Räddade 2 av 14 bilder i en mätning (`tools/streckkod.py`); vilka koder som lästes är inte kontrollerat (felläsningar?). Inte inbyggt.
+- **Bara läsa koder på varan i handen.** I en butik är hyllan full av koder, och skannern läser i dag hela bilden. Med handmodellen går det att kräva att koden ligger i den bekräftade handens ruta innan namnet sägs. Viktigt före butikstest.
+- **Pilot i en mindre lokal butik** där Elias känner personalen: lättare att få ja, och något att visa de stora kedjorna. Fråga den som bestämmer, och fråga handledaren om tester före kursstart får räknas.
+
 **Status 7/11: fokus på handen fungerar (PR #31–#37).** `--hand` ställer linsen efter handens avstånd och gav ungefär tre gånger så många läsningar. Arbetslogg: `docs/rapporter/Vision5_handen_och_fokus_2026-11-07.pdf`. **Nästa steg, i ordning:**
 1. Fler rundor med och utan `--hand`, fler varor (burk, blank påse, liten kod), blundande test. Kör alltid `python3 tools/usb_hastighet.py` först.
 2. ~~**Handmodell** som bekräftar att det närmaste är en hand~~ Gjort 9/11 (ändring 38, se status 9/11). Att rösten guidar efter handen även utan kod ("Lyft varan lite.") är inte byggt.
