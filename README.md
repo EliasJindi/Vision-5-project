@@ -10,6 +10,7 @@ Den här filen visar vad som finns var. Hela bakgrunden, resultaten och nästa s
 | `barcode_scanner.py` | **Streckkodsskannern.** Läser koder, slår upp varan i kartan och ger röstvägledning |
 | `detect_spatial.py` | Hinder och akutlarm (YOLO + djup), Gemini-knapp. Körs inte samtidigt som skannern |
 | `hand_region.py` | Fokus på handen: hittar det närmaste föremålet och ställer linsen efter avståndet |
+| `hand_model.py` | Handmodellen (MediaPipe på kameran): är det närmaste föremålet en hand? Styr när "kod sedd" ger röst |
 | `scan_filters.py` | Höjd- och djupfilter som avvisar felläsningar |
 | `voice_guidance/` | Röstvägledningen: beslutslogik, röst, korg, länk till andra program |
 | `audio_manager.py`, `tts_engine.py`, `phrases.py` | Ljudkö, talsyntes (Piper) och alla fraser |

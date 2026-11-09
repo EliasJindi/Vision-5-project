@@ -118,6 +118,13 @@
 #     röstvägledningen (regel 3b: "håll stilla" eller en riktning). Detektorn kan aldrig bekräfta en
 #     vara. tools/streckkod.py 7/11: sedd i 20 av 93 bilder med hand, läst i 3, inga synliga falsklarm,
 #     24 ms per bild. Saknas detektorn i OpenCV stängs det av. (2026-11-07)
+# 38. Handmodell (Elias 9/11, steg B): MediaPipes handflatemodell + landmärkesmodell körs på kameran
+#     (hand_model.py) och avgör om det närmaste föremålet är en hand. "Kod sedd" (ändring 37) går till
+#     rösten bara om en hand bekräftats de senaste 2 s, så att koder på varor som ligger på bordet inte
+#     ger "lite uppåt" eller "håll stilla". Fokus, ljus och avkodning är oförändrade. tools/handmodell.py
+#     9/11: vara i handen 83 % och 83 %, bordet utan händer 0 % och 0 %. Modellerna laddas ner av
+#     tools/handmodell.py; saknas de, eller fallerar modellen under körningen, fungerar skannern som förut.
+#     --utan-handmodell stänger av den. Loggen får "handmodell" (landmärkesvärdet) och "hand_ok".
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
@@ -140,6 +147,7 @@ Kör:     python3 barcode_scanner.py [kartor/produkter.geojson] [--diag] [--4k] 
          --sikte huvud|hand     riktningarna: vrid huvudet mot koden, eller flytta varan
          --lank PORT            länk till andra program på 127.0.0.1:PORT (JSON-rader)
          --utan-hand            stäng av handläget (standard sedan ändring 36: fokus efter handens avstånd)
+         --utan-handmodell      stäng av handmodellen (ändring 38): "kod sedd" ger röst även utan bekräftad hand
 Logg:    logs/scan_<datum>_<tid>_<4k|1080p>.jsonl (en rad per avläsning)
 """
 import argparse
@@ -155,6 +163,7 @@ import depthai as dai
 import numpy as np
 import zxingcpp
 
+import hand_model
 from hand_region import HandFocus, find_near_region, lens_for_distance
 from scan_filters import FILTER_TEXT, depth_plausible, expected_depth, is_thin, modules_for, size_from_corners
 from voice_guidance import AimConvention, GuidanceMode, create_session
@@ -364,6 +373,11 @@ def seen_codes(detector, color, crop):
         return []
     return [((sum(float(p[0]) for p in quad) / len(quad) + x) / w, (sum(float(p[1]) for p in quad) / len(quad) + y) / h)
             for quad in points]
+
+
+def load_hand_model():
+    """Handmodellen (ändring 38), eller (None, varför) om modellerna inte är nedladdade. Laddar aldrig ner."""
+    return hand_model.load()
 
 
 def send_focus(control_queue, command, width, height):
@@ -598,6 +612,11 @@ def print_summary(mode, facit, stats, log_path, use_filter=False):
         print(f"  Hand: hittad i {stats['hand_frames']} av {len(stats['decode_ms'])} avkodade bildrutor, "
               f"koden hittad i handrutan {stats['crop_hits']} gånger, "
               f"sedd men inte läst i {stats.get('seen_frames', 0)} bildrutor")
+    if stats.get("model_on"):
+        ms = stats.get("model_ms") or []
+        print(f"  Handmodell: handen bekräftad i {stats['model_ok']} av {stats['model_frames']} bildrutor med handruta, "
+              f"kod sedd utan bekräftad hand i {stats['seen_no_hand']} bildrutor (rösten tyst)"
+              + (f", {np.median(ms):.0f} ms per bildruta" if ms else ""))
     print(f"  Filter ({'PÅ' if use_filter else 'AV, bara loggat'}):")
     if not stats["filtered"]:
         print("    inga läsningar fångades")
@@ -619,7 +638,8 @@ def diagnose(color, results, n_saved, folder, meta=None):
               f"skärpa {sharpness:5.0f} ({'suddigt' if sharpness < 50 else 'ok'})  "
               f"{'lins %3d  ' % meta['lins'] if meta and 'lins' in meta else ''}"
               f"{'hand %.2f m  ' % meta['hand_m'] if meta and 'hand_m' in meta else ''}"
-              f"{'kod sedd  ' if meta and meta.get('sedd') else ''}"
+              f"{'handmodell %.2f %s  ' % (meta['handmodell'], 'ok' if meta.get('hand_ok') else 'ej') if meta and 'handmodell' in meta else ''}"
+              f"{('kod sedd (tyst, ingen hand)  ' if meta.get('sedd_utan_hand') else 'kod sedd  ') if meta and meta.get('sedd') else ''}"
               f"koder: {[r.text for r in results] or 'inga'}")
 
     if n_saved < DIAG_MAX_IMAGES:
@@ -654,6 +674,8 @@ def main():
                     help="handläget (standard): fokus efter handens avstånd, ljus och avkodning på handen med varan")
     ap.add_argument("--utan-hand", dest="utan_hand", action="store_true",
                     help="stäng av handläget: vanlig autofokus och hela bilden")
+    ap.add_argument("--utan-handmodell", dest="utan_handmodell", action="store_true",
+                    help="stäng av handmodellen: \"kod sedd\" ger röst även när ingen hand bekräftats")
     ap.add_argument("--facit", metavar="EAN",
                     help="rätt streckkod i testet: loggar varje läsning som rätt/fel och märker felläsningar")
     ap.add_argument("--filter", action="store_true",
@@ -695,7 +717,8 @@ def main():
              "tries": 0, "hit_frames": 0, "right_frames": 0, "lens_all": [], "lens_hit": [],
              "filtered": {}, "kept_right": 0, "kept_wrong": 0, "right_frames_kept": 0,
              "msgs": 0, "t_first": None, "t_last": None, "seq_first": None, "seq_last": None,
-             "decode_ms": [], "hand_frames": 0, "crop_hits": 0, "hand_mode": use_hand, "seen_frames": 0}
+             "decode_ms": [], "hand_frames": 0, "crop_hits": 0, "hand_mode": use_hand, "seen_frames": 0,
+             "model_on": False, "model_frames": 0, "model_ok": 0, "seen_no_hand": 0, "model_ms": []}
     if facit:
         print(f"Facit: {facit}. Felläsningar markeras.")
 
@@ -707,7 +730,13 @@ def main():
                                  AimConvention.HEAD if args.sikte == "huvud" else AimConvention.HAND, args.lank)
     except OSError as e:   # t.ex. porten är upptagen
         sys.exit(f"❌ Kunde inte öppna länken på port {args.lank}: {e}")
-    with dai.Device(build_pipeline(uhd=args.uhd, focus=args.fokus, focus_share=args.fokusruta, hand=use_hand)) as device, open(log_path, "a", encoding="utf-8") as log:
+    hand_check, hand_why = None, "--utan-handmodell"
+    if use_hand and not args.utan_handmodell:
+        hand_check, hand_why = load_hand_model()   # ändring 38
+    pipeline = build_pipeline(uhd=args.uhd, focus=args.fokus, focus_share=args.fokusruta, hand=use_hand)
+    if hand_check is not None:
+        hand_check.add_to(pipeline)
+    with dai.Device(pipeline) as device, open(log_path, "a", encoding="utf-8") as log:
         usb = device.getUsbSpeed()
         print(f"Kamera: {'4K 3840x2160 @ ' + str(UHD_FPS) if args.uhd else '1080p @ ' + str(CAMERA_FPS)} fps, USB {usb.name}")
         if args.fokus is not None:
@@ -718,12 +747,20 @@ def main():
             print("Fokus: efter handens avstånd, ljuset efter handen (det närmaste inom en armlängd); utan hand autofokus")
         else:
             print("Fokus: autofokus")
+        if hand_check is not None:
+            hand_check.attach(device)
+            stats["model_on"], stats["model_ms"] = True, hand_check.ms
+            print("Handmodell: PÅ (\"kod sedd\" ger röst bara när en hand bekräftats de senaste 2 s)")
+        elif use_hand:
+            print(f"ℹ️  Handmodell: AV ({hand_why})"
+                  + ("" if args.utan_handmodell else ". Kör python3 tools/handmodell.py en gång för att ladda ner den"))
         print(f"Filter: {'PÅ (avvisar tunna remsor, ingen position vid orimligt djup)' if args.filter else 'AV (loggas och märks bara)'}")
         if args.uhd and usb not in (dai.UsbSpeed.SUPER, dai.UsbSpeed.SUPER_PLUS):
             print("⚠️  4K kräver USB3 (blå port). Med USB2 kan bilden hacka eller utebli.")
         q = device.getOutputQueue(name="out", maxSize=4, blocking=False)
         control_q = device.getInputQueue("control") if use_hand else None
         hand_focus = HandFocus() if use_hand else None
+        gate = hand_model.HandGate()
         detector = make_detector() if use_hand else None
         if use_hand and detector is None:
             print("ℹ️  OpenCV saknar streckkodsdetektorn: \"håll stilla\" när koden syns men inte går att läsa är avstängt")
@@ -758,6 +795,7 @@ def main():
                 meta = frame_meta(msg["color"])
                 depth = msg["depth"].getFrame()   # uint16, millimeter
                 t_decode = time.perf_counter()
+                region = None
                 if hand_focus is not None:
                     region = find_near_region(depth)
                     command = hand_focus.update(now, region)
@@ -773,10 +811,26 @@ def main():
                 stats["decode_ms"].append((time.perf_counter() - t_decode) * 1000)
                 stats["hand_frames"] += "hand" in meta
                 stats["crop_hits"] += where == "ruta"
+                if hand_check is not None and region is not None:   # ändring 38: är det närmaste en hand?
+                    try:
+                        score = hand_check.check(color, region)
+                    except Exception as e:   # modellen fallerar: fortsätt som utan handmodell
+                        print(f"⚠️  Handmodellen fungerar inte ({e!r}). Fortsätter utan den.")
+                        hand_check, stats["model_on"] = None, False
+                    else:
+                        gate.update(now, score >= hand_check.lm_threshold)
+                        meta["handmodell"] = round(score, 2)
+                        meta["hand_ok"] = gate.active(now)
+                        stats["model_frames"] += 1
+                        stats["model_ok"] += meta["hand_ok"]
                 seen = [] if results or hand_focus is None else seen_codes(detector, color, hand_focus.crop(now))
                 if seen:
                     meta["sedd"] = len(seen)
                     stats["seen_frames"] += 1
+                    if hand_check is not None and not gate.active(now):
+                        meta["sedd_utan_hand"] = True   # ingen bekräftad hand: rösten tiger (ändring 38)
+                        stats["seen_no_hand"] += 1
+                        seen = []
                 recs = [handle_barcode(res, color, depth, products, log, now, mode, facit, stats, meta, args.filter)
                         for res in results]
                 session.on_frame(now, recs, seen)   # röstvägledning och länk (ändring 29-31, 37), även utan läsning

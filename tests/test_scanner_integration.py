@@ -149,6 +149,34 @@ def barcode_frame(ean, scale=3, center=(960, 540)):
     return np.ascontiguousarray(np.stack([canvas] * 3, -1))
 
 
+class FakeHandModel:
+    """Handmodellen (ändring 38) utan kamera: check() ger förbestämda landmärkesvärden."""
+    lm_threshold = 0.5
+
+    def __init__(self, score):
+        self.score, self.ms, self.calls = score, [], 0
+        self.pipeline = self.device = "inte satt"
+
+    def add_to(self, pipeline):
+        self.pipeline = pipeline
+
+    def attach(self, device):
+        self.device = device
+
+    def check(self, color, region):
+        self.calls += 1
+        if isinstance(self.score, Exception):
+            raise self.score
+        self.ms.append(60.0)
+        return self.score
+
+
+def centre_detector():
+    detector = mock.Mock()
+    detector.detect.return_value = (True, [[(910, 520), (1010, 520), (1010, 560), (910, 560)]])   # mitt i bild
+    return detector
+
+
 class ScannerMainTest(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
@@ -369,6 +397,74 @@ class ScannerMainTest(unittest.TestCase):
     def test_invalid_port_is_rejected(self):
         with self.assertRaises(SystemExit):
             self.run_scanner("--lank", "70000")
+
+    def run_with_model(self, model, *flags, **kwargs):
+        import barcode_scanner
+        with mock.patch.object(barcode_scanner, "make_detector", return_value=centre_detector()), \
+                mock.patch.object(barcode_scanner, "load_hand_model", return_value=(model, "")) as load:
+            out = self.run_scanner("--vagledning", "text", *flags, blank=True, **kwargs)
+        return out, load
+
+    def test_a_seen_code_without_a_confirmed_hand_is_silent(self):
+        model = FakeHandModel(0.02)                                      # t.ex. en vara på bordet
+        out, _ = self.run_with_model(model)
+        self.assertNotIn("Håll stilla.", out)
+        self.assertIn("Handmodell: PÅ", out)
+        self.assertIn("handen bekräftad i 0 av 6 bildrutor", out)
+        self.assertIn("kod sedd utan bekräftad hand i 6 bildrutor (rösten tyst)", out)
+        self.assertIn("sedd men inte läst i 6 bildrutor", out)            # detektorn såg den ändå
+        self.assertEqual(model.calls, 6)
+        self.assertIsNone(model.pipeline)                                # lades i kamerauppsättningen (None här)
+        self.assertIsInstance(model.device, FakeDevice)
+
+    def test_a_seen_code_with_a_confirmed_hand_still_gives_hold_still(self):
+        out, _ = self.run_with_model(FakeHandModel(0.93))
+        self.assertIn("Håll stilla.", out)
+        self.assertIn("handen bekräftad i 6 av 6 bildrutor", out)
+        self.assertIn("kod sedd utan bekräftad hand i 0 bildrutor", out)
+        self.assertIn("60 ms per bildruta", out)
+
+    def test_reads_are_not_affected_by_the_hand_model(self):
+        import barcode_scanner
+        with mock.patch.object(barcode_scanner, "load_hand_model", return_value=(FakeHandModel(0.0), "")):
+            out = self.run_scanner("--vagledning", "text")
+        self.assertIn("Tomatpure", out)                                  # läsningen bekräftas som förut
+        self.assertIn("(confirmed)", out)
+        records = self.log_records()
+        self.assertTrue(records)
+        self.assertTrue(all(r.get("handmodell") == 0.0 and r.get("hand_ok") is False for r in records))
+
+    def test_the_model_is_not_run_without_a_hand_region(self):
+        model = FakeHandModel(0.9)
+        self.run_with_model(model, depth=np.zeros((720, 1280), np.uint16))   # inget djup: ingen blå ruta
+        self.assertEqual(model.calls, 0)
+
+    def test_a_failing_model_is_switched_off_and_the_scanner_goes_on(self):
+        model = FakeHandModel(RuntimeError("NN"))
+        out, _ = self.run_with_model(model)
+        self.assertIn("Handmodellen fungerar inte", out)
+        self.assertIn("Håll stilla.", out)                               # som utan handmodell
+        self.assertEqual(model.calls, 1)                                 # bara en gång
+
+    def test_without_downloaded_models_the_scanner_works_as_before(self):
+        import barcode_scanner
+        with mock.patch.object(barcode_scanner, "make_detector", return_value=centre_detector()):
+            out = self.run_scanner("--vagledning", "text", blank=True)
+        self.assertIn("Handmodell: AV", out)
+        self.assertIn("tools/handmodell.py", out)
+        self.assertIn("Håll stilla.", out)
+        self.assertNotIn("handen bekräftad", out)
+
+    def test_the_hand_model_can_be_turned_off(self):
+        out, load = self.run_with_model(FakeHandModel(0.0), "--utan-handmodell")
+        load.assert_not_called()
+        self.assertIn("Håll stilla.", out)
+        self.assertIn("Handmodell: AV (--utan-handmodell)", out)
+
+    def test_no_hand_model_without_hand_mode(self):
+        out, load = self.run_with_model(FakeHandModel(0.0), "--utan-hand")
+        load.assert_not_called()
+        self.assertNotIn("Handmodell", out)
 
 
 if __name__ == "__main__":
