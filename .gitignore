@@ -14,3 +14,7 @@ cache/
 
 # Oanvänt: gamla bilder, utskrifter och filer. Ska aldrig upp på GitHub (repot är publikt).
 ej_anvant/
+
+# Modeller som laddas ner av verktygen (t.ex. handmodellen, tools/handmodell.py)
+models/
+*.blob
