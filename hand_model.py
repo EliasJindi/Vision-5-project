@@ -68,7 +68,8 @@ def decode_palms(scores: Sequence[float], regressors: Sequence[float], anchors: 
     Modellens utdata till rutor (0-1 i den kvadratiska bilden). scores: 896 råvärden (före sigmoid).
     regressors: 896 x 18 (mitt x, mitt y, bredd, höjd i pixlar relativt ankaret, sedan 7 punkter).
     """
-    raw = np.clip(np.asarray(scores, dtype=np.float32).reshape(-1), -100, 100)   # som MediaPipe
+    # float64: e^100 ryms inte i float32 och gav "overflow encountered in exp" (provet 9/11, ofarligt men störande)
+    raw = np.clip(np.asarray(scores, dtype=np.float64).reshape(-1), -100, 100)   # som MediaPipe
     prob = 1 / (1 + np.exp(-raw))
     reg = np.asarray(regressors, dtype=np.float32).reshape(len(anchors), -1)
     palms = []

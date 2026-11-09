@@ -32,6 +32,15 @@ class GuidanceSessionTest(unittest.TestCase):
                                      "text": "Tomatpure. Tillagd."}])
         self.assertEqual(session.basket.items(), [(EAN_A, "Tomatpure")])
 
+    def test_seen_codes_and_the_hand_flag_reach_the_engine(self):
+        session, _, _ = build()
+        with mock.patch.object(session._engine, "update", return_value=None) as update:
+            session.on_frame(1.0, [], [(0.5, 0.9)], True)
+            session.on_frame(1.5, [])
+        first, second = update.call_args_list[0].args[0], update.call_args_list[1].args[0]
+        self.assertEqual((first.seen, first.hand), (((0.5, 0.9),), True))
+        self.assertEqual((second.seen, second.hand), ((), False))         # som förut
+
     def test_the_same_product_scanned_again_is_not_added_twice(self):
         session, link, speaker = build()
         for t in (1.0, 1.5, 10.0, 10.5):   # borta i över 5 s mellan: bekräftas igen

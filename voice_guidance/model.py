@@ -96,6 +96,8 @@ class FrameObservation:
     reads: Tuple[CodeRead, ...] = ()
     seen: Tuple[Point, ...] = ()      # mitten på koder som detektorn SER men som inte gick att läsa (7/11).
                                       # Kan aldrig bekräfta en vara, bara vägleda. Gamla loggar: tom
+    hand: bool = False                # handmodellen har bekräftat en hand de senaste 2 s (9/11). Bara då kan en
+                                      # sedd kod starta en ny sökning efter "redo för nästa vara". Utan modell: False
 
 
 @dataclass(frozen=True)
