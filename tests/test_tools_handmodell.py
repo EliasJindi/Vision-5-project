@@ -3,8 +3,9 @@ import unittest
 import numpy as np
 
 from hand_region import NearRegion
-from tools.handmodell import (Palm, crop_to_frame, decode_palms, iou, letterbox_rows, median_text,
-                              non_max_suppression, overlaps, palm_anchors, square_crop, square_to_frame, summarize)
+from tools.handmodell import (Palm, confirmed_within, crop_to_frame, decode_palms, iou, letterbox_rows, median_text,
+                              mosaic_path, non_max_suppression, overlaps, palm_anchors, share_text, square_crop,
+                              square_to_frame, summarize)
 
 
 def logit(p):
@@ -144,6 +145,30 @@ class MedianTextTest(unittest.TestCase):
         self.assertEqual(median_text([0.9, 0.5, 0.7]), "0.70 (0.50-0.90)")
         self.assertEqual(median_text([39.4, 41.0], "{:.0f}"), "41 (39-41)")
         self.assertEqual(median_text([]), "-")
+
+
+class RuleTest(unittest.TestCase):
+    def test_a_hand_seen_in_the_box_counts_for_two_seconds(self):
+        rows = [(0.0, True, False),       # blå, ingen hand än
+                (0.5, True, True),        # hand i rutan
+                (1.0, True, False),
+                (2.5, True, False),       # precis 2 s efter
+                (3.0, True, False),       # 2,5 s efter: inte längre
+                (3.5, False, False),      # ingen blå ruta: räknas inte
+                (4.0, True, True)]
+        self.assertEqual(confirmed_within(rows), (4, 6))
+        self.assertEqual(confirmed_within(rows, window=0.0), (2, 6))
+
+    def test_a_hand_outside_any_box_does_not_count(self):
+        self.assertEqual(confirmed_within([(0.0, False, True), (0.5, True, False)]), (0, 1))
+        self.assertEqual(confirmed_within([]), (0, 0))
+
+    def test_texts(self):
+        self.assertEqual(share_text(7, 10), "7 av 10 (70 %)")
+        self.assertEqual(share_text(0, 47), "0 av 47 (0 %)")
+        self.assertEqual(share_text(0, 0), "-")
+        self.assertEqual(mosaic_path(), "logs/handmodell.jpg")
+        self.assertEqual(mosaic_path("dorr"), "logs/handmodell_dorr.jpg")
 
 
 if __name__ == "__main__":
