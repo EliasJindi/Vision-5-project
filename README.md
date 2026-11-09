@@ -15,7 +15,7 @@ Den här filen visar vad som finns var. Hela bakgrunden, resultaten och nästa s
 | `audio_manager.py`, `tts_engine.py`, `phrases.py` | Ljudkö, talsyntes (Piper) och alla fraser |
 | `gemini_service.py`, `telemetry_logger.py` | Gemini-anrop och mätning av ström och temperatur |
 | `analyze_scans.py`, `analyze_telemetry.py`, `measure_phrases.py` | Analys av loggar och fraslängd |
-| `tools/` | Hjälpverktyg: USB-test, siktebild, mosaik av en körning, handtest, mätning av streckkodsdetektorn |
+| `tools/` | Hjälpverktyg: USB-test, siktebild, mosaik av en körning, handtest, mätning av streckkodsdetektorn och av handmodellen (`handmodell.py`) |
 | `tests/` | Enhetstester |
 | `docs/` | `ROSTVAGLEDNING.md` (regler och protokoll). `docs/rapporter/` har arbetsloggarna som PDF |
 | `ej_anvant/` | Gammalt som inte används. Ligger i `.gitignore` |
@@ -30,6 +30,7 @@ python3 tools/usb_hastighet.py                        # går kameran på USB 3?
 clear && sleep 15 && python3 barcode_scanner.py --4k --vagledning tal --sikte hand --filter --diag
 python3 tools/mosaik.py NAMN                          # vad såg kameran i senaste körningen?
 python3 analyze_scans.py --pixlar                     # säkra och osäkra läsningar
+python3 tools/handmodell.py                           # hittar handmodellen handen? (logs/handmodell.jpg)
 python3 -m unittest discover -s tests -t .            # alla tester
 ```
 
