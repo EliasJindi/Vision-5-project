@@ -125,6 +125,10 @@
 #     9/11: vara i handen 83 % och 83 %, bordet utan händer 0 % och 0 %. Modellerna laddas ner av
 #     tools/handmodell.py; saknas de, eller fallerar modellen under körningen, fungerar skannern som förut.
 #     --utan-handmodell stänger av den. Loggen får "handmodell" (landmärkesvärdet) och "hand_ok".
+# 39. Efter "redo för nästa vara" startar en sedd kod en ny sökning om handmodellen bekräftat en hand
+#     (session.on_frame(..., hand)). Provet 9/11: ättikan i handen, koden sedd men aldrig läst, och rösten
+#     tyst i 33 s eftersom bara en LÄST kod startade en ny sökning (regel 4 sedan 5/11). Utan handmodell
+#     som förut. Och: handflatemodellens råvärden räknas i float64 ("overflow encountered in exp"). (2026-11-09)
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
@@ -833,7 +837,8 @@ def main():
                         seen = []
                 recs = [handle_barcode(res, color, depth, products, log, now, mode, facit, stats, meta, args.filter)
                         for res in results]
-                session.on_frame(now, recs, seen)   # röstvägledning och länk (ändring 29-31, 37), även utan läsning
+                hand_ok = hand_check is not None and gate.active(now)   # ändring 39: får starta en ny sökning
+                session.on_frame(now, recs, seen, hand_ok)   # röstvägledning och länk (ändring 29-31, 37), även utan läsning
                 if now - started >= WARMUP_S:
                     stats["right_frames_kept"] += any(r.get("correct") and "tunn" not in r["filter"] for r in recs)
                     stats["tries"] += 1

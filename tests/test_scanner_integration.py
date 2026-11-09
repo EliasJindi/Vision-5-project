@@ -461,6 +461,21 @@ class ScannerMainTest(unittest.TestCase):
         self.assertIn("Håll stilla.", out)
         self.assertIn("Handmodell: AV (--utan-handmodell)", out)
 
+    def hand_flags(self, model):
+        import barcode_scanner
+        session = mock.Mock()
+        session.on_frame.return_value = None
+        with mock.patch.object(barcode_scanner, "make_detector", return_value=centre_detector()), \
+                mock.patch.object(barcode_scanner, "load_hand_model", return_value=(model, "")), \
+                mock.patch.object(barcode_scanner, "create_session", return_value=session):
+            self.run_scanner(blank=True)
+        return [c.args[3] for c in session.on_frame.call_args_list]
+
+    def test_the_session_is_told_when_a_hand_is_confirmed(self):
+        self.assertEqual(self.hand_flags(FakeHandModel(0.93)), [True] * 6)
+        self.assertEqual(self.hand_flags(FakeHandModel(0.02)), [False] * 6)
+        self.assertEqual(self.hand_flags(None), [False] * 6)             # utan modell: som förut
+
     def test_no_hand_model_without_hand_mode(self):
         out, load = self.run_with_model(FakeHandModel(0.0), "--utan-hand")
         load.assert_not_called()

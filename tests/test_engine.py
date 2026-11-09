@@ -261,6 +261,62 @@ class SeenCodeTest(unittest.TestCase):
 
     def test_old_logs_without_detector_behave_as_before(self):
         self.assertEqual(FrameObservation(0.0).seen, ())
+        self.assertFalse(FrameObservation(0.0).hand)
+
+
+def seen_in_hand(t, *centers):
+    """Detektorn ser en kod och handmodellen har bekräftat en hand (skannerns ändring 38-39)."""
+    return FrameObservation(t, (), tuple(centers), hand=True)
+
+
+class NextProductTest(unittest.TestCase):
+    """9/11: efter "redo för nästa vara" ska en sedd kod i en bekräftad hand starta en ny sökning."""
+
+    def setUp(self):
+        self.engine = GuidanceEngine(CATALOG)
+        self.engine.update(frame(0.0, read()))
+        self.engine.update(frame(0.5, read()))                            # tomatpurén bekräftad
+
+    def ready(self):
+        self.assertEqual(self.engine.update(frame(8.5)).kind, ActionKind.READY)
+        self.assertIsNone(self.engine.update(frame(12.0)))               # tyst efter "redo", som förut
+
+    def test_a_seen_code_in_a_confirmed_hand_starts_a_new_search(self):
+        self.ready()
+        self.assertEqual(self.engine.update(seen_in_hand(13.0, (0.5, 0.95))).kind, ActionKind.CODE_BELOW)
+        self.assertIsNone(self.engine.update(frame(15.0)))
+        self.assertEqual(self.engine.update(frame(17.0)).kind, ActionKind.NO_CODE)   # tipsen är tillbaka
+        self.assertEqual(self.engine.update(seen_in_hand(20.0, (0.5, 0.5))).kind, ActionKind.STEADY)
+
+    def test_the_new_product_is_confirmed_as_usual(self):
+        self.ready()
+        self.engine.update(seen_in_hand(13.0, (0.5, 0.5)))
+        self.engine.update(frame(14.0, read(EAN_B)))
+        self.assertEqual(self.engine.update(frame(14.5, read(EAN_B))).kind, ActionKind.UNKNOWN_PRODUCT)
+
+    def test_without_a_confirmed_hand_it_stays_silent(self):
+        self.ready()
+        said = [self.engine.update(seen(t, (0.5, 0.5))) for t in (13.0, 15.0, 20.0, 30.0, 45.0)]
+        self.assertEqual(said, [None] * 5)                               # t.ex. en vara på bordet
+
+    def test_before_ready_the_product_just_scanned_does_not_start_a_search(self):
+        said = [self.engine.update(seen_in_hand(t, (0.5, 0.5))) for t in (1.0, 3.0, 6.0, 8.0)]
+        self.assertEqual(said, [None] * 4)                               # varan är kanske kvar i handen
+        self.ready()                                                     # "redo" kommer som förut
+
+    def test_a_hand_without_a_seen_code_starts_nothing(self):
+        self.ready()
+        empty_hand = [self.engine.update(FrameObservation(t, (), (), hand=True)) for t in (13.0, 20.0, 30.0)]
+        self.assertEqual(empty_hand, [None] * 3)
+
+    def test_ready_is_said_again_after_the_next_product(self):
+        self.ready()
+        self.engine.update(seen_in_hand(13.0, (0.5, 0.5)))
+        self.engine.update(frame(14.0, read(EAN_B)))
+        self.engine.update(frame(14.5, read(EAN_B)))                      # nästa vara klar
+        said = kinds(self.engine.update(seen_in_hand(t, (0.5, 0.5))) for t in (15.0, 17.0, 20.0))
+        self.assertEqual(said, [None] * 3)                               # före nästa "redo": ingen ny sökning
+        self.assertEqual(self.engine.update(frame(22.5)).kind, ActionKind.READY)
 
 
 class ConflictTest(unittest.TestCase):

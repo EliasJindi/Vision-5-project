@@ -68,6 +68,16 @@ class DecodeTest(unittest.TestCase):
         self.assertEqual([round(p.score, 2) for p in decode_palms(self.scores, self.reg, self.anchors)], [0.6])
         self.assertEqual(len(decode_palms(self.scores, self.reg, self.anchors, threshold=0.4)), 2)
 
+    def test_extreme_raw_scores_give_no_warning(self):
+        import warnings
+        self.scores[:] = -1000.0                                         # som på kameran 9/11
+        self.scores[5] = 1000.0
+        self.reg[5, 2:4] = (10.0, 10.0)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")                               # en varning blir ett fel
+            (p,) = decode_palms(self.scores, self.reg, self.anchors)
+        self.assertAlmostEqual(p.score, 1.0)
+
     def test_nothing_found(self):
         self.assertEqual(decode_palms(self.scores, self.reg, self.anchors), [])
 

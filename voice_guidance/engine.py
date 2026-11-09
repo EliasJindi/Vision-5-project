@@ -22,6 +22,11 @@ Reglerna, i prioritetsordning (se docs/ROSTVAGLEDNING.md):
      lämnade användaren ensam i en minut (Elias, 4-5/11).
      Efter en lyckad scanning sägs i stället "redo för nästa vara" en gång, när varan varit borta en stund
      (användaren har då kanske ingen vara i handen, så "vänd varan" vore fel). Elias 5/11.
+     Sedan tyst tills en ny kod läses, eller (9/11, med handmodellen) tills detektorn ser en kod medan en
+     hand är bekräftad: då börjar en ny sökning med regel 3b och tipsen. Provet 9/11: ättikan i handen,
+     koden syntes men lästes aldrig, och rösten var tyst i 33 s. Före "redo" startar en sedd kod ingen
+     sökning (varan som just skannats är kanske kvar i handen), och utan bekräftad hand inte heller
+     (koder på varor som ligger på bordet).
   5. Annars tystnad. Motorn pratar hellre för lite än för mycket.
 
 Pip: när regel 3 hade velat säga något men takten håller tillbaka talet hörs ett kort pip i stället
@@ -109,6 +114,7 @@ class GuidanceEngine:
         self._last_success: Optional[str] = None      # varan som senast bekräftades
         self._last_cue = _NEVER
         self._ready_pending = False                   # en vara har bekräftats: säg "redo" när den varit borta en stund
+        self._ready_said = False                      # "redo" är sagt: en sedd kod i en bekräftad hand startar en ny sökning
 
     @property
     def config(self) -> GuidanceConfig:
@@ -251,12 +257,14 @@ class GuidanceEngine:
             self._no_code_said += 1
         if action.kind is ActionKind.READY:
             self._ready_pending = False                  # en gång, sedan tyst tills en ny kod syns
+            self._ready_said = True
         if action.ean is not None:
             self._confirmed.add(action.ean)
             self._votes.pop(action.ean, None)
             self._searching = False                      # sökningen lyckades: inga tips när varan läggs ner
             self._last_success = action.ean
             self._ready_pending = True
+            self._ready_said = False
         return action
 
     # ---------- minne ----------
@@ -268,10 +276,12 @@ class GuidanceEngine:
         """
         def starts_search(read: CodeRead) -> bool:
             return read.ean not in self._confirmed and not self._just_scanned(read.ean)
-        if self._search_since is None or any(starts_search(r) for r in obs.reads):
+        seen_in_hand = bool(obs.seen) and obs.hand and self._ready_said   # 9/11: en ny vara i handen, koden syns
+        if self._search_since is None or any(starts_search(r) for r in obs.reads) or seen_in_hand:
             self._no_code_said = 0
             self._searching = True
             self._ready_pending = False
+            self._ready_said = False
         if self._search_since is None or obs.reads or self._sees_new_code(obs):
             self._search_since = obs.t   # en kod som syns (läst eller bara sedd) betyder att sökningen går framåt
 
