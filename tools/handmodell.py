@@ -27,6 +27,9 @@
 #   inte kan skilja ut. Som i MediaPipe bekräftas nu varje handflata i den blå rutan av landmärkesmodellen
 #   (hand_landmark_lite_sh4.blob, 224x224), som ger ett eget värde för 'det här är en hand'. Handrutan
 #   skärs ut ur 4K-bilden (hand_rect). Sammanfattningen visar regeln med och utan den.
+# 2026-11-09 (Elias: "försök köra om med krympningen"): handrutan krymptes 3-5 gånger direkt ur 4K med
+#   warpAffine, som tar enstaka pixlar, och handen blev kornig. Nu förminskas bilden med medelvärden
+#   först (shrink_factor), så att rutan högst halveras av warpAffine.
 # =========================================================================
 import argparse
 import hashlib
@@ -265,6 +268,16 @@ def mosaic_path(name: str = "") -> str:
     return f"logs/handmodell_{name}.jpg" if name else "logs/handmodell.jpg"
 
 
+def shrink_factor(pts: Sequence[Tuple[float, float]], size: int = LM_INPUT) -> int:
+    """
+    Hur många gånger kamerabilden ska förminskas (med medelvärden) innan handrutan skärs ut, så att
+    rutan blir mellan size och 2 x size pixlar. warpAffine tar enstaka pixlar: krymper den en 4K-ruta
+    3-5 gånger direkt blir handen kornig (körningen vara1_lm 9/11: riktiga händer median 0,30).
+    """
+    side = math.dist(pts[1], pts[2])
+    return max(1, int(side // size))
+
+
 def above_text(values: Sequence[float], threshold: float) -> str:
     """'7 av 10 över 0.5', eller '-' om inget finns."""
     return f"{sum(1 for v in values if v >= threshold)} av {len(values)} över {threshold:g}" if values else "-"
@@ -380,12 +393,22 @@ def main():
                 return non_max_suppression(decode_palms(out.getLayerFp16("classificators"),
                                                         out.getLayerFp16("regressors"), anchors, args.troskel))
 
-            def hand_score(color, palm, ox, oy, side):
-                """Landmärkesmodellen på handrutan, utskuren ur 4K-bilden: värdet för 'det här är en hand'."""
+            def hand_score(color, shrunk, palm, ox, oy, side):
+                """
+                Landmärkesmodellen på handrutan: värdet för 'det här är en hand'. Bilden förminskas först
+                med medelvärden (shrink_factor), en gång per faktor och bildruta (shrunk), sedan skärs rutan ut.
+                """
                 pts = hand_rect(palm, ox, oy, side)
-                mat = cv2.getAffineTransform(np.float32(pts[1:]), np.float32([(0, 0), (LM_INPUT, 0), (LM_INPUT, LM_INPUT)]))
+                k = shrink_factor(pts)
+                if k not in shrunk:
+                    shrunk[k] = color if k == 1 else cv2.resize(
+                        color, (color.shape[1] // k, color.shape[0] // k), interpolation=cv2.INTER_AREA)
+                img = shrunk[k]
+                sx, sy = img.shape[1] / color.shape[1], img.shape[0] / color.shape[0]
+                src = np.float32([(x * sx, y * sy) for x, y in pts[1:]])
+                mat = cv2.getAffineTransform(src, np.float32([(0, 0), (LM_INPUT, 0), (LM_INPUT, LM_INPUT)]))
                 t = time.perf_counter()
-                send(q_lm_in, cv2.warpAffine(color, mat, (LM_INPUT, LM_INPUT)), LM_INPUT)
+                send(q_lm_in, cv2.warpAffine(img, mat, (LM_INPUT, LM_INPUT)), LM_INPUT)
                 out = q_lm_out.get()
                 ms["lm"].append((time.perf_counter() - t) * 1000)
                 return float(out.getLayerFp16("Identity_1")[0]), pts
@@ -422,14 +445,14 @@ def main():
                         where["ruta"] = box
 
                     # 3. Landmärkesmodellen avgör för handflatorna i den blå rutan
-                    ok, lm_ok, rects = {}, {}, []
+                    ok, lm_ok, rects, shrunk = {}, {}, [], {}
                     for kind in ("hela", "ruta"):
                         scores[kind] += [fr.score for _, fr in found[kind]]
                         inside = [(sq, fr) for sq, fr in found[kind] if region is not None and overlaps(region, fr)]
                         ok[kind] = bool(inside)
                         lm_ok[kind] = False
                         for sq, fr in inside[:2]:
-                            value, pts = hand_score(color, sq, *where[kind])
+                            value, pts = hand_score(color, shrunk, sq, *where[kind])
                             scores[f"lm_{kind}"].append(value)
                             if value >= args.lm_troskel:
                                 lm_ok[kind] = True
