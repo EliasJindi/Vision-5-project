@@ -1,6 +1,6 @@
 # HANDOFF: Vision-5 (till nästa agent)
 
-Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätserien (avsnitt 3, 4, 6, 7 och 10). Avsnitt 7 reviderades därefter efter en genomgång med Elias (ny ordning, ingen deadlinepress). **Uppdaterad 2026-10-27** efter fokustesterna 18 och 20/10 och filtertestet 27/10 (avsnitt 0, 5, 6, 7, 9, 10 och nytt avsnitt 11 med arbetsloggarna som PDF i `docs/`). **Uppdaterad 2026-10-29** efter varutesterna (kaffefilter, Coca-Cola med EAN-8): avsnitt 3, 6, 7, 10 och 11. **Uppdaterad 2026-11-03** efter att röstvägledningen byggts (PR #16): avsnitt 1, 3, 7, 9, 10 och 11. **Uppdaterad 2026-11-05** efter de första proven med röst på Pi:n och felsökningen av kameran (Y-adaptern var trasig), PR #19–#28: avsnitt 0, 1, 3, 5, 6, 7, 9, 10 och 11. **Uppdaterad 2026-11-07** efter 6–7/11: USB 3 (kontaktens riktning), kamerans vinkel, "Sakta närmare."/"Håll stilla.", verktygen i `tools/` och fokus på handen (`--hand`), PR #31–#37: avsnitt 0, 1, 3, 6, 7, 9, 10 och 11. Läs hela filen innan du gör något. Den beskriver vad projektet är, vad som är gjort, hur säkra vi är på varje resultat, vad som är på gång och **varför**. Filen innehåller medvetet inga rumsmått, koordinater, foton eller personnamn: repot är publikt.
+Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätserien (avsnitt 3, 4, 6, 7 och 10). Avsnitt 7 reviderades därefter efter en genomgång med Elias (ny ordning, ingen deadlinepress). **Uppdaterad 2026-10-27** efter fokustesterna 18 och 20/10 och filtertestet 27/10 (avsnitt 0, 5, 6, 7, 9, 10 och nytt avsnitt 11 med arbetsloggarna som PDF i `docs/`). **Uppdaterad 2026-10-29** efter varutesterna (kaffefilter, Coca-Cola med EAN-8): avsnitt 3, 6, 7, 10 och 11. **Uppdaterad 2026-11-03** efter att röstvägledningen byggts (PR #16): avsnitt 1, 3, 7, 9, 10 och 11. **Uppdaterad 2026-11-05** efter de första proven med röst på Pi:n och felsökningen av kameran (Y-adaptern var trasig), PR #19–#28: avsnitt 0, 1, 3, 5, 6, 7, 9, 10 och 11. **Uppdaterad 2026-11-07** efter 6–7/11: USB 3 (kontaktens riktning), kamerans vinkel, "Sakta närmare."/"Håll stilla.", verktygen i `tools/` och fokus på handen (`--hand`), PR #31–#37: avsnitt 0, 1, 3, 6, 7, 9, 10 och 11. **Uppdaterad 2026-11-09** efter 7–9/11: regel 3b (detektorn), "Redo" efter 8 s, ordning i repot, handmodellen (MediaPipe i två steg) i skannern och att rösten inte tystnar efter "Redo", PR #40–#55: avsnitt 0, 1, 6, 7, 9, 10 och 11. Läs hela filen innan du gör något. Den beskriver vad projektet är, vad som är gjort, hur säkra vi är på varje resultat, vad som är på gång och **varför**. Filen innehåller medvetet inga rumsmått, koordinater, foton eller personnamn: repot är publikt.
 
 ---
 
@@ -11,7 +11,8 @@ Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätseri
 - **Elias är student och kör testerna själv på en Raspberry Pi.** Du ser inte hårdvaran. Allt du vet kommer från det Elias klistrar in (terminalutskrifter, bilder). Be om utskrift, gissa inte.
 - **Ingen kodändring utan att Elias bett om den.** Föreslå först. Elias har uttryckligen sagt: "nej gör inte nya ändringar" när jag ändrade oombedd. När Elias säger "ja gör så" till ett konkret förslag är det klartecken för just det. **Igen 5/11:** "vad har du ändrat, du har inte sagt om du får ändra heller", efter att egna tillägg (korgens regler, "Redo för nästa vara") byggts och mergats utan fråga. Arbetssätt sedan dess: lägg fram ett konkret förslag (gärna en tabell med före/nu), bygg och merga först när Elias säger "kör". Skilj i svaret på vad Elias bad om och vad du själv valt.
 - **Elias idéer är värda att mäta (7/11).** "Man visar alltid produkter med handen" blev `--hand`, som gav ungefär tre gånger så många läsningar. Ta idén på allvar, bygg ett mätverktyg först (`tools/narmast.py`), sedan funktionen.
-- **Vid en dålig körning: titta på bilderna innan du gissar.** `python3 tools/mosaik.py NAMN` (eller `NAMN mitten`). 6/11 visade mosaikerna kameran mot taket, varan i bildens kant och motljus, inte fel i koden. Elias vill ha `sleep 15 &&` före körningar så att han hinner ställa sig.
+- **Slutsatser ska bygga på upprepade körningar (Elias 9/11):** "är du säker på att det är pga konsekventa saker? och inte enbart utifrån ett resultat". Gör positiva och negativa körningar separat (`tools/handmodell.py --namn …`), en fråga per körning, och säg uttryckligen vad som bygger på en enda körning. Elias vill ta det "en sak i taget", som numrerade steg.
+- **Vid en dålig körning: titta på bilderna innan du gissar.** `python3 tools/mosaik.py NAMN` (eller `NAMN mitten`). 6/11 visade mosaikerna kameran mot taket, varan i bildens kant och motljus, inte fel i koden. Elias vill ha `sleep 15 &&` före körningar så att han hinner ställa sig (9/11: `sleep 5` räcker för korta mätningar). Sedan 9/11 kör han ofta från laptopen över SSH: i ett nytt fönster saknas `(venv)`, kör `source venv/bin/activate`.
 - **Användarperspektivet först (Elias, 5/11):** "ingen användare kommer ha det så idealt som vi har det". Tester på stöd i perfekt läge visar bara bästa fall. Röstens kommandon ska vara **korta och enkla handgrepp** för någon som inte ser, avstånd i **armlängd**, inte centimeter.
 - **Säg alltid vad du ändrat och varför**, och kommentera det i filhuvudet (de numrerade ändringslistorna i `barcode_scanner.py` är mönstret).
 - **Vanliga misstag att undvika** (alla har hänt):
@@ -21,6 +22,8 @@ Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätseri
   - Att ge råd som skapar ett nytt fel (jag föreslog att höja kameran med saker under, och det lutade uppställningen och förstörde flera körningar). Elias hittade felet själv.
   - Att påstå att något "bevisats" på tunt underlag.
   - Att tolka brus som mönster: under mätserien 17/10 drogs tre egna tolkningar tillbaka (se avsnitt 4). Dra inga slutsatser av en enstaka körning, och skriv uttryckligen *uppmätt / tolkning / hypotes*.
+  - Mutationstest som lämnar en gammal förkompilerad fil kvar (9/11): blev den ändrade filen lika stor och återställdes samma sekund läste Python den gamla `.pyc`, och ett värde blev fel. Kör `python3 -B` med `PYTHONDONTWRITEBYTECODE=1` och rensa `__pycache__` efteråt.
+  - Att köra nedladdad kod för att jämföra (9/11 stoppades det). Läs den och skriv av formlerna i stället.
   - Att tro att en inklistrad utskrift är den nya körningen. Elias klistrar ibland in den gamla. **Kontrollera loggnamnet (tiden) på raden `Loggar till logs/scan_…`** och be om den nya vid behov.
 - **Elias tar emot kodgranskning av andras kod** (ofta skriven av en annan AI-agent). Elias har gett tillåtelse att ändra kod om du tycker den är dålig, så länge du säger vad du ändrat och förklarar felet.
 - **Måttband i tum.** Elias mäter i tum. Räkna om (tum × 2,54 = cm) i alla instruktioner.
@@ -74,13 +77,14 @@ Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätseri
 | `scan_filters.py` | Höjd- och djupfilter och modulantal (EAN-13/UPC-A 95, EAN-8 67). Bara standardbiblioteket, delas av skannern och analysen |
 | `analyze_scans.py` | Utvärderar filtren på `logs/scan_*.jsonl`. `--pixlar`: säkra/osäkra läsningar per px/modul. `--lins`: linsläge vid säkra läsningar per avstånd. Går utan kameran |
 | `hand_region.py` | **Fokus på handen** (7/11): det närmaste föremålet inom en armlängd i djupbilden, `HandFocus` (när kameran ska få ny lins/ljus) och `lens_for_distance` (linstabellen ur `--lins`). Ren numpy |
-| `tools/` | Hjälpverktyg som överlever omstart: `usb_hastighet.py`, `sikte.py` (en bild till `logs/sikte.jpg`), `mosaik.py` (16 `--diag`-bilder från senaste körningen), `narmast.py` (ruta runt handen). Körs från `~/ai_glasses` |
+| `hand_model.py` | **Handmodellen** (9/11, ändring 38): MediaPipes handflatemodell (128×128) och landmärkesmodell (224×224) på kamerans processor. `HandModel.check()` ger landmärkesvärdet för handflatan i den blå rutan, `HandGate` regeln "bekräftad inom 2 s". Laddar aldrig ner något själv |
+| `tools/` | Hjälpverktyg som överlever omstart: `usb_hastighet.py`, `sikte.py` (en bild till `logs/sikte.jpg`), `mosaik.py` (16 `--diag`-bilder från senaste körningen), `narmast.py` (ruta runt handen), `streckkod.py` (ser detektorn koden? zoom), `handmodell.py` (hittar handmodellen handen? laddar ner modellerna till `models/`, `--namn` per körning). Körs från `~/ai_glasses` |
 | `voice_guidance/` | **Röstvägledning** (3–5/11): `engine.py` (beslutslogik), `voice.py` (inkl. pip), `basket.py` (korgen), `catalog.py` (namn och `info`), `link.py` (JSON-länk för t.ex. C#), `session.py`, `replay.py`. Se `docs/ROSTVAGLEDNING.md` |
-| `tests/` | 200 enhetstester: `python3 -m unittest discover -s tests -t .` |
+| `tests/` | 281 enhetstester: `python3 -m unittest discover -s tests -t .` |
 | `docs/` | `ROSTVAGLEDNING.md`. Arbetsloggarna (PDF) ligger i `docs/rapporter/`, se avsnitt 11 |
 | `ej_anvant/` | Gammalt som inte används (t.ex. `test_cam.py`, en gammal kameratest). Mappen är i `.gitignore`: bilder och utskrifter som läggs där når aldrig GitHub |
 
-**Inte i repot (finns bara på Pi:n):** `kartor/produkter.geojson`, `kartor/mobler.geojson`, `.env`, `logs/`, `cache/`, Piper-modellen.
+**Inte i repot (finns bara på Pi:n):** `kartor/produkter.geojson` (5 varor sedan 9/11), `kartor/mobler.geojson`, `.env`, `logs/`, `cache/`, Piper-modellen, `models/` (handmodellerna, i `.gitignore`).
 
 ---
 
@@ -250,6 +254,19 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 | Regeln "närmast = handen" tar fel när ingen hand hålls fram (pappersrulle, kroppen). Hela bilden läses ändå, så ingen kod missas, men lins och ljus kan hamna fel en stund | Uppmätt |
 | En enda läsning i stället för två hade gett **4 fel namn** i 88 loggar (två: 0) | Uppmätt (replay) |
 
+**Detektorn, rösten och handmodellen (7–9/11).** Detaljer: `docs/rapporter/Vision5_handmodellen_2026-11-09.pdf`.
+
+| Fynd | Status |
+|---|---|
+| Regel 3b: koden sedd men inte läst ger riktning eller "Håll stilla.". Detektorn såg koden i 20 av 93 bilder med hand, 24 ms | Uppmätt, en körning |
+| Med kameran rätt vinklad och blundande: tomatpurén från första tips till namn på 12 s. Kameran för högt: varan i nederkanten | Uppmätt |
+| **Handflatemodellen ensam räknade bordet med varor som hand i 16–55 %** och gav falsklarm i bakgrunden i alla körningar (upp till 0,87) | Uppmätt, fyra körningar |
+| **Med landmärkesmodellen (hela bilden, inom 2 s): saltburk 83 %, ättiksflaska 83 %, bordet utan händer 0 % och 0 %** (landmärkesvärden högst 0,04) | Uppmätt, två körningar per fall |
+| Handrutan blev kornig när den krymptes 3–5 gånger direkt ur 4K; förminskning med medelvärden först höjde saltburken från 53 till 83 % | Uppmätt (olika körningar) |
+| I skannern: handen bekräftad i 72 % av bildrutorna med blå ruta, 121 ms per bildruta på Pi:n (ca 64 ms på kameran) | Uppmätt, ett rösttest |
+| Ättiksflaskan gav 33 s tystnad efter "Redo": bara en läst kod startade en ny sökning. Ändrat (ändring 39), inte prövat på Pi:n | Uppmätt; ändringen otestad |
+| Ättiksflaskan (liten kod, böjd, blank): 98 s till namnet, 15 läsningar avvisade som tunn remsa | Uppmätt |
+
 **Pi:n kan tappa wifi** (hände 27/10, `vision-pi1.local` gick inte att nå). Se avsnitt 9. **venv:** efter en omstart saknas `(venv)` i prompten och skannern säger `No module named 'cv2'`: kör `source venv/bin/activate`.
 
 **Test i uppställning att använda:** **koden nära mitten av bilden** (annars fokuserar autofokus på bakgrunden), köket i dagsljus, fönstret bakom kameran, **bara testobjektet i bild**, kameran plant, paketet rakt upp på ett stabilt stöd med rak framsida mot kameran, **tejpmarkerad bas för paketet och kamerans fötter** så att uppställningen kan upprepas. Mät vinkeln med mobilens vattenpass. Skriv ner varje ändring (en sak i taget). Mät avstånd med djupet, inte måttbandet.
@@ -260,9 +277,16 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 
 **Tidsram (2026-10-17):** exjobbet börjar först nästa termin, så det finns ingen deadline att stressa mot. En person kommer då att hjälpa Elias med koden. Prioritera därför att det som byggs nu är **förstått, repeterbart och dokumenterat** framför att hinna med många funktioner. Ordningen nedan reviderades efter en genomgång samma dag: punkt 2 är ny, positionstestet är flyttat fram och vinkel och djupkontroll är sammanslagna i punkt 5. Kodändringar föreslås först och görs när Elias säger ja.
 
+**Status 9/11: handmodellen är inbyggd (PR #40–#55).** Regel 3b (detektorn), "Redo" efter 8 s, handmodellen (MediaPipe i två steg) styr när "kod sedd" ger röst, och en sedd kod i en bekräftad hand startar en ny sökning efter "Redo". Arbetslogg: `docs/rapporter/Vision5_handmodellen_2026-11-09.pdf`. **Nästa steg, i ordning:**
+1. Rösttest med 3–4 varor i rad (kartan har 5), så att ändring 39 prövas på Pi:n.
+2. **Väntar på Elias beslut:** en sedd kod utan bekräftad hand ska hålla tipsen tillbaka (i dag räknas den som "ingen kod", och "Håll varan framför dig…" hördes när varan hölls fram); snabbare handmodell (förminska 4K en gång per bildruta); frasen i stället för "en halv armlängd".
+3. Butikstest när tillstånd finns: utan `--diag` (inga bilder sparas), helst med batterikortet (18–23/11). Förfrågningar om butikstest och examensarbete är skickade till flera dagligvaruföretag; fråga Elias om svar.
+4. Hållare med fast vinkel ca 20° nedåt. Kameran pekade för högt i flera körningar även 7–9/11.
+5. **Examensarbetet:** kandidatexamen i Informatik (GIK28T, 15 hp), vecka 13–22 våren 2027, på plats. Frågeställning: "Hur kan djupseende, streckkodsläsning och röstvägledning kombineras för att en person utan syn självständigt ska kunna identifiera varor vid matinköp?" Före kursstart: handledare, metod (design science föreslagen), litteraturstudie, forskningsetik och test med frivilliga blinda och gravt synskadade (Elias: "jag tänker inte blunda och låtsas som att det räcker").
+
 **Status 7/11: fokus på handen fungerar (PR #31–#37).** `--hand` ställer linsen efter handens avstånd och gav ungefär tre gånger så många läsningar. Arbetslogg: `docs/rapporter/Vision5_handen_och_fokus_2026-11-07.pdf`. **Nästa steg, i ordning:**
 1. Fler rundor med och utan `--hand`, fler varor (burk, blank påse, liten kod), blundande test. Kör alltid `python3 tools/usb_hastighet.py` först.
-2. **Handmodell** som bekräftar att det närmaste är en hand (MediaPipe, helst på kamerans processor; kontrollera att den ryms och passar DepthAI 2.29). Sedan kan rösten guida efter handen även utan kod ("Lyft varan lite.").
+2. ~~**Handmodell** som bekräftar att det närmaste är en hand~~ Gjort 9/11 (ändring 38, se status 9/11). Att rösten guidar efter handen även utan kod ("Lyft varan lite.") är inte byggt.
 3. Hållare med fast vinkel ca 20° nedåt (CAD-fil), vinklad USB 3-sladd. Batterikortet kommer 18–23/11 (avsnitt 5).
 4. **Väntar på Elias beslut:** ny fras i stället för "en halv armlängd" (förslag: "Böj armen och håll varan framför dig."). **Avgjort 7/11:** `--hand` är standard (ändring 36, `--utan-hand` stänger av); tipsen efter "Håll stilla." behåller sin takt (efter 8 s har användaren ändå rört sig); två läsningar krävs (en gav 4 fel namn); "Finns redan i korgen." vid återvisning är rätt (Elias testade det med flit).
 5. Butikstester när ICA ger tillstånd.
@@ -378,6 +402,10 @@ python3 barcode_scanner.py --lank 5555                          # JSON-länk på
 vcgencmd get_throttled; vcgencmd pmic_read_adc EXT5V_V          # ström
 lsusb -t                                                        # USB3 (5000M) eller USB2 (480M)
 python3 tts_engine.py --prewarm                                 # förgenerera tal (inte samtidigt som detect_spatial.py)
+clear && sleep 5 && python3 tools/handmodell.py --sekunder 40 --namn vara1   # hittar handmodellen handen? logs/handmodell_vara1.jpg
+python3 barcode_scanner.py --4k --vagledning tal --sikte hand --filter --utan-handmodell   # utan handmodellen (som före 9/11)
+python3 -m json.tool kartor/produkter.geojson > /dev/null && echo "kartan ok"   # är kartan rätt skriven?
+PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -t .   # testerna utan förkompilerade filer (efter mutationstest)
 ```
 
 Sammanställning av alla körningar görs med `analyze_scans.py`, som läser `logs/scan_*.jsonl` (fälten står i avsnitt 3; från PR #11 även `h_px`, `hojd_andel`, `forvantat_djup_m` och `filter`). Träffprocent (försök) och bildrutor/s från kameran finns bara i terminalens sammanfattning.
@@ -394,8 +422,10 @@ Elias hämtar bilder genom att högerklicka i VS Code och välja **Download**. S
 - Riktningskonventionen: Elias kör `--sikte hand` i proven (kameran stilla, varan i handen). Ska `hand` bli standard?
 - Är tipsen lätta att följa blundande? Är 10 s mellan dem lagom i längden? Saknas något kommando?
 - ~~Hjälper `--fokusruta`?~~ Nej när varan inte ligger i mitten (6/11); `--hand` ersätter den.
-- Ska `--hand` bli standard för varuläsning? Ska tipsen vänta 8 s efter "Håll stilla."? Vilken fras ersätter "en halv armlängd"?
-- Handmodell (MediaPipe) som nästa steg?
+- ~~Ska `--hand` bli standard? Ska tipsen vänta 8 s efter "Håll stilla."?~~ Avgjort 7/11 (ja, nej). Vilken fras ersätter "en halv armlängd"? Öppen.
+- ~~Handmodell (MediaPipe) som nästa steg?~~ Byggd 9/11.
+- Ska en sedd kod utan bekräftad hand hålla tipsen tillbaka? Ska handmodellen göras snabbare (121 ms per bildruta)?
+- Vilka svar har kommit på förfrågningarna om butikstest och examensarbete?
 - ~~Replay på de gamla loggarna~~ Gjort 4–5/11: 0 fel vara.
 - Grannvaror på en hylla: räknas två produkter nära varandra som konflikt (`conflict_radius`)? Testas i butiken.
 - ~~Ska en tunn läsning ge "lite närmare" i stället för tystnad~~ Beslutat och byggt 3/11.
@@ -417,6 +447,7 @@ Nyaste överst.
 
 | Fil | Innehåll |
 |---|---|
+| `docs/rapporter/Vision5_handmodellen_2026-11-09.pdf` | 7–9/11: detektorn och regel 3b, rösttester blundande (12 s), "Redo" efter 8 s, handmodellen (handflata ensam 16–55 % fel på bordet; med landmärkesmodellen 83 % och 83 % med vara, 0 % utan), förminskningsfelet, handmodellen i skannern, 33 s tystnad och ändring 39, vad som är osäkert, nästa steg |
 | `docs/rapporter/Vision5_handen_och_fokus_2026-11-07.pdf` | 6–7/11: USB 3 och kontakten, kamerans vinkel (mosaikerna), "Sakta närmare."/"Håll stilla.", en läsning gav 4 fel namn, linstabellen, `--hand` 13–15 % mot 4 %, vad som är osäkert, nästa steg |
 | `docs/rapporter/Vision5_rostvagledning_pa_pi_2026-11-05.pdf` | Röstvägledningen på Pi:n 4–5/11: vad som hände i varje prov, felsökningen av kamerakrascherna (Y-adaptern), ändringarna PR #19–#28, vad som är osäkert, nästa steg |
 | `docs/rapporter/Vision5_rostvagledning_2026-11-03.pdf` | Arbetslogg 3/11: vad som byggdes och varför, arkitekturen, hur det är testat (99 tester, mutationskontroll), vad som inte är testat, nästa steg |
