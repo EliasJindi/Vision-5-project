@@ -5,7 +5,7 @@
 # MediaPipes handflatedetektor, på kamerans egen processor bredvid skannerns handläge, och för varje
 # bild jämförs: hittade djupet ett närmaste föremål (blå ruta), hittade modellen en hand (grön ruta),
 # och ligger handen i den blå rutan? Ändrar ingenting i skannern. Avgör om steg B (bygga in den) lönar sig.
-#   python3 tools/handmodell.py                 (4K, 45 s)
+#   python3 tools/handmodell.py                 (4K, 60 s)
 #   clear && sleep 15 && python3 tools/handmodell.py --sekunder 60
 # Gör så här under körningen: håll fram olika varor som vanligt, men sänk också handen ibland så att
 # något annat är närmast (bordet, dörren). Då syns både om modellen hittar handen med varan, och om
@@ -14,6 +14,12 @@
 # github.com/geaxgx/depthai_hand_tracker (palm_detection_sh4.blob, 128x128, 896 rutor). Den laddas ner
 # till models/ första gången (4,7 MB, kontrolleras med sha256). models/ läggs aldrig upp på GitHub.
 # Avkodningen nedan följer MediaPipes palm_detection-inställningar (SSD-ankare, 4 lager, steg 8/16/16/16).
+# 2026-11-09 (andra körningen): på hela bilden hittade modellen handen dåligt (säkerhet median 0,54, "nej"
+#   på bilder med tydliga händer) och gav falsklarm på dörrkarmen. Hela 4K-bilden blir 128x128 och
+#   handen 15-20 pixlar; modellens upphovsman skriver att de svarta kanterna gör det värre och att det
+#   hjälper att skära ut området runt handen. Därför körs modellen nu två gånger per bild: på hela bilden
+#   (som förut) och på den blå rutan, utskuren som en kvadrat och förstorad (square_crop). Sammanfattningen
+#   jämför dem. Djupet säger VAR handen troligen är, modellen avgör OM det är en hand.
 # =========================================================================
 import argparse
 import hashlib
@@ -118,6 +124,31 @@ def letterbox_rows(width: int, height: int, size: int = INPUT) -> Tuple[int, int
     return h, top, size - h - top
 
 
+def square_crop(region, width: int, height: int, margin: float = 0.15, min_share: float = 0.2) -> Tuple[int, int, int]:
+    """
+    En kvadrat (x, y, sida i pixlar) runt den blå rutan (hand_region.NearRegion), med margin av sidan
+    runt om, flyttad så att den ligger helt i bilden. Sidan är minst min_share av bildhöjden (en liten
+    ruta förstoras annars väldigt mycket) och högst bildhöjden.
+    """
+    rw, rh = (region.x1 - region.x0) * width, (region.y1 - region.y0) * height
+    side = int(round(max(rw, rh) * (1 + 2 * margin)))
+    side = max(int(min_share * height), min(height, side), 1)
+    cx, cy = (region.x0 + region.x1) / 2 * width, (region.y0 + region.y1) / 2 * height
+    x = int(round(min(max(cx - side / 2, 0), width - side)))
+    y = int(round(min(max(cy - side / 2, 0), height - side)))
+    return x, y, side
+
+
+def crop_to_frame(palm: Palm, box: Tuple[int, int, int], width: int, height: int) -> Palm:
+    """Från den utskurna kvadraten (0-1) till kamerabilden (0-1)."""
+    x, y, side = box
+    def fx(v: float) -> float:
+        return min(1.0, max(0.0, (x + v * side) / width))
+    def fy(v: float) -> float:
+        return min(1.0, max(0.0, (y + v * side) / height))
+    return Palm(palm.score, fx(palm.x0), fy(palm.y0), fx(palm.x1), fy(palm.y1))
+
+
 def overlaps(region, palm: Palm, margin: float = 0.05, share: float = 0.25) -> bool:
     """
     Ligger handen i den blå rutan (hand_region.NearRegion)? Minst share av handens ruta ska ligga
@@ -160,30 +191,40 @@ def ensure_model(path: str = MODEL_PATH) -> str:
     return path
 
 
+def median_text(values: Sequence[float], fmt: str = "{:.2f}") -> str:
+    """'median (lägsta–högsta)', eller '-' om inget finns."""
+    if not values:
+        return "-"
+    v = sorted(values)
+    return f"{fmt.format(v[len(v) // 2])} ({fmt.format(v[0])}-{fmt.format(v[-1])})"
+
+
 def report(rows, tiles, ms, scores) -> None:
-    """Sammanfattning och mosaik. Anropas innan kameran stängs (som tools/streckkod.py)."""
+    """
+    Sammanfattning och mosaik. Anropas innan kameran stängs (som tools/streckkod.py).
+    rows: [(närmast, hand hela, i rutan hela, hand ruta, i rutan ruta)]. ms och scores: {"hela": [], "ruta": []}.
+    """
     import cv2
     from tools.streckkod import pick_tiles
     os.makedirs("logs", exist_ok=True)
-    s = summarize(rows)
-    picked = [tiles[i][0] for i in pick_tiles([odd for _, odd in tiles])]   # där de inte är överens först
+    whole = summarize([(r[0], r[1], r[2]) for r in rows])
+    crop = summarize([(r[0], r[3], r[4]) for r in rows])
+    picked = [tiles[i][0] for i in pick_tiles([odd for _, odd in tiles])]   # där rutan missade först
     while picked and len(picked) % 4:
         picked.append(np.zeros((TILE_H, TILE_W, 3), np.uint8))
     if picked:
         cv2.imwrite("logs/handmodell.jpg", np.vstack([np.hstack(picked[i:i + 4]) for i in range(0, len(picked), 4)]),
                     [cv2.IMWRITE_JPEG_QUALITY, 85])
-    print(f"\nKlart: logs/handmodell.jpg (blå = närmast i djupet, grön = handmodellen). {s['bilder']} bilder.")
-    print(f"  Närmaste föremål (dagens handruta): {s['narmast']}   Handmodellen hittade en hand: {s['hand']}")
-    print(f"  Båda, och handen ligger i rutan (bekräftad):  {s['bekraftad']}")
-    print(f"  Närmast men ingen hand i rutan:               {s['narmast_utan_hand']}"
-          "   <- annat föremål, eller missade modellen handen? Se mosaiken")
-    print(f"  Hand men inget närmaste föremål:              {s['hand_utan_narmast']}")
-    print(f"  Ingenting:                                    {s['ingenting']}")
-    if scores:
-        print(f"  Modellens säkerhet när den hittade en hand: median {sorted(scores)[len(scores) // 2]:.2f}, "
-              f"lägsta {min(scores):.2f}")
-    if ms:
-        print(f"  Handmodellen på kameran: median {sorted(ms)[len(ms) // 2]:.0f} ms per bild (max {max(ms):.0f} ms)")
+    print(f"\nKlart: logs/handmodell.jpg. {whole['bilder']} bilder, närmaste föremål (blå) i {whole['narmast']}.")
+    print("  Blå = närmast i djupet. Gul = modellen på hela bilden. Grön = modellen på den utskurna rutan.")
+    print(f"  {'':42}{'Hela bilden':>18}{'Utskuren ruta':>20}")
+    print(f"  {'Hittade en hand':42}{whole['hand']:>18}{crop['hand']:>20}")
+    print(f"  {'Handen i den blå rutan (bekräftad)':42}{whole['bekraftad']:>18}{crop['bekraftad']:>20}")
+    print(f"  {'Blå ruta men ingen hand':42}{whole['narmast_utan_hand']:>18}{crop['narmast_utan_hand']:>20}"
+          "   <- annat föremål, eller missad hand? Se mosaiken")
+    print(f"  {'Hand utan blå ruta (falsklarm?)':42}{whole['hand_utan_narmast']:>18}{'-':>20}")
+    print(f"  {'Säkerhet, median (lägsta-högsta)':42}{median_text(scores['hela']):>18}{median_text(scores['ruta']):>20}")
+    print(f"  {'Tid på kameran, ms':42}{median_text(ms['hela'], '{:.0f}'):>18}{median_text(ms['ruta'], '{:.0f}'):>20}")
 
 
 def main():
@@ -195,7 +236,7 @@ def main():
 
     ap = argparse.ArgumentParser(description="Hittar handmodellen handen med varan, och låter den bli annat?")
     ap.add_argument("--1080p", dest="hd", action="store_true", help="1080p i stället för 4K")
-    ap.add_argument("--sekunder", type=float, default=45.0)
+    ap.add_argument("--sekunder", type=float, default=60.0)
     ap.add_argument("--troskel", type=float, default=0.5, help="modellens säkerhet för att räknas som hand (0-1)")
     args = ap.parse_args()
     if not 0.05 <= args.troskel <= 0.95:
@@ -217,7 +258,8 @@ def main():
     nn.out.link(palm_out.input)
 
     os.makedirs("logs", exist_ok=True)
-    rows, ms, tiles, scores = [], [], [], []
+    rows, tiles = [], []
+    ms, scores = {"hela": [], "ruta": []}, {"hela": [], "ruta": []}
     print("Startar kameran. Håll fram varor som vanligt, och sänk handen ibland så att något annat är närmast.")
     reported = False
     try:
@@ -227,6 +269,21 @@ def main():
             q_out = device.getOutputQueue("palm_out", maxSize=1, blocking=True)
             control = device.getInputQueue("control")
             focus = HandFocus()
+
+            def find_palms(square, kind):
+                """Kör modellen på en kvadratisk bild (128 x 128, BGR). Rutor 0-1 i den bilden."""
+                frame = dai.ImgFrame()
+                frame.setType(dai.ImgFrame.Type.BGR888p)
+                frame.setWidth(INPUT)
+                frame.setHeight(INPUT)
+                frame.setData(square.transpose(2, 0, 1).flatten())
+                t = time.perf_counter()
+                q_in.send(frame)
+                out = q_out.get()
+                ms[kind].append((time.perf_counter() - t) * 1000)
+                return non_max_suppression(decode_palms(out.getLayerFp16("classificators"),
+                                                        out.getLayerFp16("regressors"), anchors, args.troskel))
+
             t0 = last = time.time()
             try:
                 while time.time() - t0 < args.sekunder:
@@ -236,45 +293,46 @@ def main():
                         continue
                     last = now
                     color, depth = msg["color"].getCvFrame(), msg["depth"].getFrame()
+                    W, H = color.shape[1], color.shape[0]
                     region = find_near_region(depth)
                     command = focus.update(now, region)
                     if command is not None:
-                        bs.send_focus(control, command, color.shape[1], color.shape[0])
+                        bs.send_focus(control, command, W, H)
 
-                    # Handmodellen: hela bilden förminskad till 128 bred, svarta kanter till en kvadrat
-                    h, top, bottom = letterbox_rows(color.shape[1], color.shape[0])
+                    # 1. Hela bilden förminskad till 128 bred, svarta kanter till en kvadrat (som förut)
+                    h, top, bottom = letterbox_rows(W, H)
                     small = cv2.copyMakeBorder(cv2.resize(color, (INPUT, h), interpolation=cv2.INTER_AREA),
                                                top, bottom, 0, 0, cv2.BORDER_CONSTANT)
-                    frame = dai.ImgFrame()
-                    frame.setType(dai.ImgFrame.Type.BGR888p)
-                    frame.setWidth(INPUT)
-                    frame.setHeight(INPUT)
-                    frame.setData(small.transpose(2, 0, 1).flatten())
-                    t = time.perf_counter()
-                    q_in.send(frame)
-                    out = q_out.get()
-                    ms.append((time.perf_counter() - t) * 1000)
-                    palms = non_max_suppression(decode_palms(out.getLayerFp16("classificators"),
-                                                             out.getLayerFp16("regressors"), anchors, args.troskel))
-                    palms = [square_to_frame(p, color.shape[1], color.shape[0]) for p in palms]
-                    scores += [p.score for p in palms]
-                    ok = region is not None and any(overlaps(region, p) for p in palms)
-                    rows.append((region is not None, bool(palms), ok))
+                    whole = [square_to_frame(p, W, H) for p in find_palms(small, "hela")]
+                    scores["hela"] += [p.score for p in whole]
+                    ok_whole = region is not None and any(overlaps(region, p) for p in whole)
+
+                    # 2. Bara den blå rutan, utskuren som en kvadrat och förstorad
+                    crop, box = [], None
+                    if region is not None:
+                        box = square_crop(region, W, H)
+                        x, y, side = box
+                        part = cv2.resize(color[y:y + side, x:x + side], (INPUT, INPUT), interpolation=cv2.INTER_AREA)
+                        crop = [crop_to_frame(p, box, W, H) for p in find_palms(part, "ruta")]
+                        scores["ruta"] += [p.score for p in crop]
+                    ok_crop = region is not None and any(overlaps(region, p) for p in crop)
+                    rows.append((region is not None, bool(whole), ok_whole, bool(crop), ok_crop))
 
                     if now - t0 >= 3 and len(tiles) < 200:           # efter uppstarten, högst 200 bilder
                         img = color.copy()
-                        W, H = img.shape[1], img.shape[0]
                         if region is not None:
                             rx, ry, rw, rh = region.to_pixels(W, H)
                             cv2.rectangle(img, (rx, ry), (rx + rw, ry + rh), (255, 128, 0), 8)
-                        for p in palms:
-                            cv2.rectangle(img, (int(p.x0 * W), int(p.y0 * H)), (int(p.x1 * W), int(p.y1 * H)), (0, 220, 0), 10)
-                        best = max((p.score for p in palms), default=0.0)
-                        text = (f"narmast: {'JA' if region else 'nej'} | hand: {f'JA {best:.2f}' if palms else 'nej'}"
-                                f" | i rutan: {'JA' if ok else 'nej'}")
+                        for p in whole:                              # gul, tunn: hela bilden
+                            cv2.rectangle(img, (int(p.x0 * W), int(p.y0 * H)), (int(p.x1 * W), int(p.y1 * H)), (0, 230, 255), 6)
+                        for p in crop:                               # grön, tjock: utskuren ruta
+                            cv2.rectangle(img, (int(p.x0 * W), int(p.y0 * H)), (int(p.x1 * W), int(p.y1 * H)), (0, 220, 0), 12)
+                        def said(palms):
+                            return f"JA {max(p.score for p in palms):.2f}" if palms else "nej"
+                        text = f"blå: {'JA' if region else 'nej'} | hela: {said(whole)} | ruta: {said(crop)}"
                         tile = cv2.resize(img, (TILE_W, TILE_H))
-                        cv2.putText(tile, text, (8, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
-                        odd = (region is not None) != ok or (bool(palms) and region is None)   # inte överens
+                        cv2.putText(tile, text.replace("å", "a"), (8, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
+                        odd = (region is not None and not ok_crop) or ok_whole != ok_crop   # rutan missade, eller oense
                         tiles.append((tile, odd))
                         print(f"  {now - t0:5.1f} s  {text}")
             except KeyboardInterrupt:

@@ -3,8 +3,8 @@ import unittest
 import numpy as np
 
 from hand_region import NearRegion
-from tools.handmodell import (Palm, decode_palms, iou, letterbox_rows, non_max_suppression, overlaps,
-                              palm_anchors, square_to_frame, summarize)
+from tools.handmodell import (Palm, crop_to_frame, decode_palms, iou, letterbox_rows, median_text,
+                              non_max_suppression, overlaps, palm_anchors, square_crop, square_to_frame, summarize)
 
 
 def logit(p):
@@ -101,6 +101,49 @@ class SummarizeTest(unittest.TestCase):
                 (False, False, False), (True, True, True)]
         self.assertEqual(summarize(rows), {"bilder": 6, "narmast": 4, "hand": 4, "bekraftad": 2,
                                            "narmast_utan_hand": 2, "hand_utan_narmast": 1, "ingenting": 1})
+
+
+class SquareCropTest(unittest.TestCase):
+    def test_square_around_the_box_with_margin(self):
+        region = NearRegion(0.4, 0.4, 0.6, 0.6, depth_m=0.45, area=0.04)   # 768 x 432 px i 4K
+        x, y, side = square_crop(region, 3840, 2160)
+        self.assertEqual(side, round(768 * 1.3))                         # längsta sidan + 15 % runt om
+        self.assertAlmostEqual(x + side / 2, 1920, delta=1)              # samma mitt
+        self.assertAlmostEqual(y + side / 2, 1080, delta=1)
+
+    def test_moved_inside_the_image_at_the_edges(self):
+        bottom = NearRegion(0.3, 0.8, 0.7, 1.0, depth_m=0.45, area=0.08)   # varan längst ner, 1536 px bred
+        x, y, side = square_crop(bottom, 3840, 2160)
+        self.assertEqual(side, 1997)
+        self.assertEqual(y + side, 2160)                                 # flyttad upp, slutar vid nederkanten
+        wide = NearRegion(0.2, 0.8, 0.8, 1.0, depth_m=0.45, area=0.12)     # 2304 px bred
+        x, y, side = square_crop(wide, 3840, 2160)
+        self.assertEqual((side, y), (2160, 0))                           # högst bildhöjden
+        self.assertEqual(x + side // 2, 1920)
+        corner = NearRegion(0.9, 0.0, 1.0, 0.1, depth_m=0.45, area=0.01)
+        x, y, side = square_crop(corner, 3840, 2160)
+        self.assertEqual((x + side, y), (3840, 0))                       # i hörnet, helt i bilden
+
+    def test_a_tiny_box_gets_a_minimum_size(self):
+        tiny = NearRegion(0.5, 0.5, 0.51, 0.51, depth_m=0.45, area=0.0001)
+        self.assertEqual(square_crop(tiny, 3840, 2160)[2], 432)          # 20 % av bildhöjden
+
+    def test_back_to_the_camera_image(self):
+        p = crop_to_frame(Palm(0.7, 0.25, 0.5, 0.75, 1.0), (1000, 500, 800), 3840, 2160)
+        self.assertAlmostEqual(p.x0, 1200 / 3840)
+        self.assertAlmostEqual(p.x1, 1600 / 3840)
+        self.assertAlmostEqual(p.y0, 900 / 2160)
+        self.assertAlmostEqual(p.y1, 1300 / 2160)
+        self.assertEqual(p.score, 0.7)
+        edge = crop_to_frame(Palm(0.7, -0.5, -0.5, 1.5, 1.5), (0, 0, 2160), 3840, 2160)
+        self.assertEqual((edge.x0, edge.y0, edge.y1), (0.0, 0.0, 1.0))
+
+
+class MedianTextTest(unittest.TestCase):
+    def test_median_and_range(self):
+        self.assertEqual(median_text([0.9, 0.5, 0.7]), "0.70 (0.50-0.90)")
+        self.assertEqual(median_text([39.4, 41.0], "{:.0f}"), "41 (39-41)")
+        self.assertEqual(median_text([]), "-")
 
 
 if __name__ == "__main__":
