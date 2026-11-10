@@ -272,8 +272,8 @@ def seen_in_hand(t, *centers):
 class NextProductTest(unittest.TestCase):
     """9/11: efter "redo för nästa vara" ska en sedd kod i en bekräftad hand starta en ny sökning."""
 
-    def setUp(self):
-        self.engine = GuidanceEngine(CATALOG)
+    def setUp(self, config=None):
+        self.engine = GuidanceEngine(CATALOG, config)
         self.engine.update(frame(0.0, read()))
         self.engine.update(frame(0.5, read()))                            # tomatpurén bekräftad
 
@@ -295,6 +295,7 @@ class NextProductTest(unittest.TestCase):
         self.assertEqual(self.engine.update(frame(14.5, read(EAN_B))).kind, ActionKind.UNKNOWN_PRODUCT)
 
     def test_without_a_confirmed_hand_it_stays_silent(self):
+        self.setUp(GuidanceConfig(next_after_ready_s=0))                 # bara ändring 39, utan 10/11
         self.ready()
         said = [self.engine.update(seen(t, (0.5, 0.5))) for t in (13.0, 15.0, 20.0, 30.0, 45.0)]
         self.assertEqual(said, [None] * 5)                               # t.ex. en vara på bordet
@@ -305,6 +306,7 @@ class NextProductTest(unittest.TestCase):
         self.ready()                                                     # "redo" kommer som förut
 
     def test_a_hand_without_a_seen_code_starts_nothing(self):
+        self.setUp(GuidanceConfig(next_after_ready_s=0))                 # bara ändring 39, utan 10/11
         self.ready()
         empty_hand = [self.engine.update(FrameObservation(t, (), (), hand=True)) for t in (13.0, 20.0, 30.0)]
         self.assertEqual(empty_hand, [None] * 3)
@@ -317,6 +319,67 @@ class NextProductTest(unittest.TestCase):
         said = kinds(self.engine.update(seen_in_hand(t, (0.5, 0.5))) for t in (15.0, 17.0, 20.0))
         self.assertEqual(said, [None] * 3)                               # före nästa "redo": ingen ny sökning
         self.assertEqual(self.engine.update(frame(22.5)).kind, ActionKind.READY)
+
+
+class NextAfterReadyTest(unittest.TestCase):
+    """10/11: 5 s efter "redo" utan kod börjar en ny sökning ändå (lampljus: handmodellen 4 %, 45 s tystnad)."""
+
+    def setUp(self, config=None):
+        self.engine = GuidanceEngine(CATALOG, config)
+        self.engine.update(frame(0.0, read()))
+        self.engine.update(frame(0.5, read()))                            # tomatpurén bekräftad
+        self.assertEqual(self.engine.update(frame(8.5)).kind, ActionKind.READY)
+
+    def run_empty(self, start, end, step=0.5):
+        said, t = [], start
+        while t <= end:
+            action = self.engine.update(frame(t))
+            if action:
+                said.append((t, action.kind))
+            t += step
+        return said
+
+    def test_next_product_after_five_seconds_then_slow_hints(self):
+        self.assertEqual(self.run_empty(9.0, 45.0),
+                         [(13.5, ActionKind.NEXT_PRODUCT), (23.5, ActionKind.NO_CODE),
+                          (33.5, ActionKind.NO_CODE_TURN), (43.5, ActionKind.NO_CODE_FLIP)])
+
+    def test_the_phrase(self):
+        from phrases import guidance_text
+        self.assertEqual(guidance_text("next_product"), "Håll nästa vara framför dig.")
+
+    def test_zero_keeps_the_old_silence(self):
+        self.setUp(GuidanceConfig(next_after_ready_s=0))
+        self.assertEqual(self.run_empty(9.0, 90.0), [])
+
+    def test_slow_repeat_zero_says_next_product_once(self):
+        self.setUp(GuidanceConfig(no_code_slow_repeat_s=0))
+        self.assertEqual(self.run_empty(9.0, 90.0), [(13.5, ActionKind.NEXT_PRODUCT)])
+
+    def test_the_previous_product_glimpsed_postpones_it(self):
+        self.assertIsNone(self.engine.update(frame(11.0, read())))     # den skannade varan skymtar förbi
+        self.assertEqual(self.run_empty(11.5, 16.0), [(16.0, ActionKind.NEXT_PRODUCT)])   # 5 s efter, inte efter "redo"
+
+    def test_a_seen_code_in_a_hand_before_five_seconds_starts_the_search_as_before(self):
+        seen = FrameObservation(10.0, (), ((0.5, 0.5),), hand=True)
+        self.assertEqual(self.engine.update(seen).kind, ActionKind.STEADY)   # ändring 39
+        self.assertNotIn(ActionKind.NEXT_PRODUCT, [k for _, k in self.run_empty(10.5, 40.0)])
+
+    def test_the_next_product_is_confirmed_as_usual(self):
+        self.run_empty(9.0, 14.0)                                         # "håll nästa vara framför dig"
+        self.engine.update(frame(15.0, read(EAN_B)))
+        self.assertEqual(self.engine.update(frame(15.5, read(EAN_B))).kind, ActionKind.UNKNOWN_PRODUCT)
+
+    def test_it_comes_again_after_the_next_ready(self):
+        self.run_empty(9.0, 14.0)
+        self.engine.update(frame(15.0, read(EAN_B)))
+        self.engine.update(frame(15.5, read(EAN_B)))                      # nästa vara klar
+        self.assertEqual(self.run_empty(16.0, 29.0),
+                         [(23.5, ActionKind.READY), (28.5, ActionKind.NEXT_PRODUCT)])
+
+    def test_negative_is_an_error(self):
+        with self.assertRaises(ValueError):
+            GuidanceConfig(next_after_ready_s=-1)
 
 
 class ConflictTest(unittest.TestCase):
@@ -436,7 +499,11 @@ class NoCodeTest(unittest.TestCase):
         self.engine.update(frame(0.0, read()))
         self.engine.update(frame(0.5, read()))                      # bekräftad
         self.engine.update(frame(1.0, read()))                      # varan syns fortfarande en stund
-        self.assertEqual(self.run_empty(1.5, 90.0), [(9.0, ActionKind.READY)])   # 8 s efter sista läsningen
+        N, TURN, FLIP = ActionKind.NO_CODE, ActionKind.NO_CODE_TURN, ActionKind.NO_CODE_FLIP
+        self.assertEqual(self.run_empty(1.5, 90.0),
+                         [(9.0, ActionKind.READY),                  # 8 s efter sista läsningen
+                          (14.0, ActionKind.NEXT_PRODUCT),          # 10/11: 5 s efter "redo", sedan glesa tips
+                          (24.0, N), (34.0, TURN), (44.0, FLIP), (54.0, N), (64.0, TURN), (74.0, FLIP), (84.0, N)])
 
     def test_ready_waits_while_the_confirmed_product_is_still_in_view(self):
         self.engine.update(frame(0.0, read()))
@@ -458,7 +525,9 @@ class NoCodeTest(unittest.TestCase):
         self.engine.update(frame(0.0, read()))
         self.engine.update(frame(0.5, read()))                      # bekräftad
         self.assertIsNone(self.engine.update(frame(7.0, read())))   # glömd (>5 s), skymtar förbi en gång
-        self.assertEqual(self.run_empty(7.5, 40.0), [(15.0, ActionKind.READY)])   # 8 s efter, inga tips
+        self.assertEqual(self.run_empty(7.5, 40.0),
+                         [(15.0, ActionKind.READY),                 # 8 s efter, inga tips före "redo"
+                          (20.0, ActionKind.NEXT_PRODUCT), (30.0, ActionKind.NO_CODE), (40.0, ActionKind.NO_CODE_TURN)])
 
     def test_the_previous_product_counts_as_a_new_code_once_a_new_search_has_begun(self):
         self.engine.update(frame(0.0, read()))

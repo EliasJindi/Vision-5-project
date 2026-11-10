@@ -36,6 +36,7 @@ class ActionKind(Enum):
     NO_CODE_TURN = "no_code_turn"          # ...vrid varan sakta (andra tipset)
     NO_CODE_FLIP = "no_code_flip"          # ...vänd varan upp och ner (tredje tipset, sedan om igen)
     READY = "ready"                        # en stund efter en lyckad scanning: redo för nästa vara (Elias 5/11)
+    NEXT_PRODUCT = "next_product"          # 5 s efter "redo" utan kod: håll nästa vara framför dig (Elias 10/11)
     CODE_SEEN = "code_seen"                # ett kort pip, inget tal: en kod syns men är inte läsbar än
 
 

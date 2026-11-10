@@ -27,6 +27,9 @@ Reglerna, i prioritetsordning (se docs/ROSTVAGLEDNING.md):
      koden syntes men lästes aldrig, och rösten var tyst i 33 s. Före "redo" startar en sedd kod ingen
      sökning (varan som just skannats är kanske kvar i handen), och utan bekräftad hand inte heller
      (koder på varor som ligger på bordet).
+     10/11: har ingen kod syntes 5 s efter "redo" börjar en ny sökning ändå: "håll nästa vara framför dig",
+     sedan tipsen i den glesa takten. Provet 10/11 i lampljus: handmodellen bekräftade handen i 4 % av
+     bildrutorna, ingen sedd kod startade sökningen och rösten var tyst i 45 s (Elias: "helst efter 5 sekunder").
   5. Annars tystnad. Motorn pratar hellre för lite än för mycket.
 
 Pip: när regel 3 hade velat säga något men takten håller tillbaka talet hörs ett kort pip i stället
@@ -72,6 +75,7 @@ class GuidanceConfig:
     no_code_fast: int = 3            # ...de första så här många gångerna...
     no_code_slow_repeat_s: float = 10.0   # ...sedan så här glest tills en kod syns (0 = tyst efter de täta; båda 0 = aldrig)
     ready_after_s: float = 8.0       # "redo för nästa vara" så här länge efter att en bekräftad vara försvann (0 = aldrig; 15 s före 7/11: för tyst)
+    next_after_ready_s: float = 5.0  # så här länge efter "redo" utan kod: "håll nästa vara framför dig" och glesa tips (0 = tyst som före 10/11)
     steady_after_s: float = 0.9      # "håll stilla" om den andra säkra läsningen dröjer så här länge (0 = aldrig)
     cue_interval_s: float = 1.0      # pip när en osäker kod syns men talet hålls tillbaka, högst så här ofta (0 = av)
     cue_quiet_s: float = 1.2         # inget pip så här snart efter tal, så att pipet inte hamnar mitt i en fras
@@ -81,8 +85,10 @@ class GuidanceConfig:
             raise ValueError("confirm_reads måste vara minst 1")
         if self.no_code_fast < 0 or self.no_code_slow_repeat_s < 0:
             raise ValueError("no_code_fast och no_code_slow_repeat_s får inte vara negativa")
-        if min(self.cue_interval_s, self.cue_quiet_s, self.ready_after_s, self.steady_after_s) < 0:
-            raise ValueError("cue_interval_s, cue_quiet_s, ready_after_s och steady_after_s får inte vara negativa")
+        if min(self.cue_interval_s, self.cue_quiet_s, self.ready_after_s, self.steady_after_s,
+               self.next_after_ready_s) < 0:
+            raise ValueError("cue_interval_s, cue_quiet_s, ready_after_s, steady_after_s och next_after_ready_s "
+                             "får inte vara negativa")
         for name in ("confirm_window_s", "lost_after_s", "conflict_window_s", "conflict_radius",
                      "conflict_hold_s", "conflict_escalate_s", "min_interval_s", "repeat_after_s",
                      "no_code_after_s", "no_code_repeat_s"):
@@ -115,6 +121,7 @@ class GuidanceEngine:
         self._last_cue = _NEVER
         self._ready_pending = False                   # en vara har bekräftats: säg "redo" när den varit borta en stund
         self._ready_said = False                      # "redo" är sagt: en sedd kod i en bekräftad hand startar en ny sökning
+        self._ready_at = _NEVER                       # när "redo" sades (10/11: ny sökning efter next_after_ready_s)
 
     @property
     def config(self) -> GuidanceConfig:
@@ -196,11 +203,27 @@ class GuidanceEngine:
             ready = self._cfg.ready_after_s and t - self._search_since >= self._cfg.ready_after_s
             return GuidanceAction(ActionKind.READY) if ready else None
         if not self._searching:
-            return None
+            return self._next_product_prompt(t)
         due = self._no_code_due(self._no_code_said)
         if due is None or t - self._search_since < due:
             return None
         return GuidanceAction(_NO_CODE_HINTS[self._no_code_said % len(_NO_CODE_HINTS)])
+
+    def _next_product_prompt(self, t: float) -> Optional[GuidanceAction]:
+        """10/11: "redo" är sagt och ingen kod har syntes på next_after_ready_s: be om nästa vara."""
+        wait = self._cfg.next_after_ready_s
+        if not self._ready_said or not wait or t - max(self._ready_at, self._search_since) < wait:
+            return None
+        return GuidanceAction(ActionKind.NEXT_PRODUCT)
+
+    def _start_slow_hints(self, t: float) -> None:
+        """En ny sökning efter "håll nästa vara framför dig": nästa tips kommer i den glesa takten."""
+        cfg = self._cfg
+        self._searching = True
+        self._ready_said = False
+        self._no_code_said = cfg.no_code_fast
+        due = self._no_code_due(self._no_code_said)
+        self._search_since = t if due is None else t - due + cfg.no_code_slow_repeat_s
 
     def _no_code_due(self, n: int) -> Optional[float]:
         """Sekunder utan kod innan tips nummer n (0 = första). None = inga fler tips."""
@@ -258,6 +281,9 @@ class GuidanceEngine:
         if action.kind is ActionKind.READY:
             self._ready_pending = False                  # en gång, sedan tyst tills en ny kod syns
             self._ready_said = True
+            self._ready_at = t
+        if action.kind is ActionKind.NEXT_PRODUCT:
+            self._start_slow_hints(t)
         if action.ean is not None:
             self._confirmed.add(action.ean)
             self._votes.pop(action.ean, None)
