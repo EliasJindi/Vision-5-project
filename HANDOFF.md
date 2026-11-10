@@ -452,6 +452,7 @@ Nyaste överst.
 
 | Fil | Innehåll |
 |---|---|
+| `docs/rapporter/Vision5_kvallsljus_2026-11-10.pdf` | 10/11: fem rösttester i lampljus (0 läsningar av tre skäl: mörker, kameran för högt, motljus; sedan lästes tomatpurén mot en upplyst vägg), handmodellen 0–26 % i lampljus mot 72 % i dagsljus, 45 s tystnad efter "Redo" och ändring 40 ("Håll nästa vara framför dig." efter 5 s, fungerade på Pi:n), ättikan 150 s vid läsgränsen, Gemini och lätta hyllor först, nästa steg |
 | `docs/rapporter/Vision5_handmodellen_2026-11-09.pdf` | 7–9/11: detektorn och regel 3b, rösttester blundande (12 s), "Redo" efter 8 s, handmodellen (handflata ensam 16–55 % fel på bordet; med landmärkesmodellen 83 % och 83 % med vara, 0 % utan), förminskningsfelet, handmodellen i skannern, 33 s tystnad och ändring 39, vad som är osäkert, nästa steg |
 | `docs/rapporter/Vision5_handen_och_fokus_2026-11-07.pdf` | 6–7/11: USB 3 och kontakten, kamerans vinkel (mosaikerna), "Sakta närmare."/"Håll stilla.", en läsning gav 4 fel namn, linstabellen, `--hand` 13–15 % mot 4 %, vad som är osäkert, nästa steg |
 | `docs/rapporter/Vision5_rostvagledning_pa_pi_2026-11-05.pdf` | Röstvägledningen på Pi:n 4–5/11: vad som hände i varje prov, felsökningen av kamerakrascherna (Y-adaptern), ändringarna PR #19–#28, vad som är osäkert, nästa steg |

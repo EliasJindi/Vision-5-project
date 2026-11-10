@@ -18,7 +18,7 @@ Den här filen visar vad som finns var. Hela bakgrunden, resultaten och nästa s
 | `analyze_scans.py`, `analyze_telemetry.py`, `measure_phrases.py` | Analys av loggar och fraslängd |
 | `tools/` | Hjälpverktyg: USB-test, siktebild, mosaik av en körning, handtest, mätning av streckkodsdetektorn och av handmodellen (`handmodell.py`) |
 | `tests/` | Enhetstester |
-| `docs/` | `ROSTVAGLEDNING.md` (regler och protokoll). `docs/rapporter/` har arbetsloggarna som PDF |
+| `docs/` | `ROSTVAGLEDNING.md` (regler och protokoll). `docs/rapporter/` har arbetsloggarna som PDF, nyast först i [listan](docs/rapporter/README.md) |
 | `ej_anvant/` | Gammalt som inte används. Ligger i `.gitignore` |
 
 Finns bara på Pi:n och aldrig på GitHub (repot är publikt): `.env`, `kartor/`, `logs/`, `cache/`, röstmodellen (`*.onnx`), `piper/` och alla bilder.
