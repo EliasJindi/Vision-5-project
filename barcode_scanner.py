@@ -129,6 +129,10 @@
 #     (session.on_frame(..., hand)). Provet 9/11: ättikan i handen, koden sedd men aldrig läst, och rösten
 #     tyst i 33 s eftersom bara en LÄST kod startade en ny sökning (regel 4 sedan 5/11). Utan handmodell
 #     som förut. Och: handflatemodellens råvärden räknas i float64 ("overflow encountered in exp"). (2026-11-09)
+# 40. 5 s efter "redo för nästa vara" utan kod säger rösten "Håll nästa vara framför dig." och ger sedan
+#     tipsen i den glesa takten (voice_guidance/engine.py, next_after_ready_s). Provet 10/11 i lampljus:
+#     handmodellen bekräftade handen i 6 av 140 bildrutor, ingen sedd kod kunde starta sökningen (ändring 39)
+#     och rösten var tyst i 45 s. Elias: "helst efter 5 sekunder". Skannern själv är oförändrad. (2026-11-10)
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
