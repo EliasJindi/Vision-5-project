@@ -382,6 +382,87 @@ class NextAfterReadyTest(unittest.TestCase):
             GuidanceConfig(next_after_ready_s=-1)
 
 
+def far(t, hand_m=0.43, *reads, seen=()):
+    """En bildruta där handmodellen bekräftat en hand på hand_m meter (skannerns ändring 42)."""
+    return FrameObservation(t, tuple(reads), tuple(seen), hand=True, hand_m=hand_m)
+
+
+class FarHandTest(unittest.TestCase):
+    """11/11, regel 4b: ingen kod och den bekräftade handen för långt bort i 2 s: "sakta närmare"."""
+
+    def setUp(self):
+        self.engine = GuidanceEngine(CATALOG)
+
+    def speak(self, frames):
+        return [(obs.t, a.kind) for obs in frames if (a := self.engine.update(obs))]
+
+    def test_a_hand_far_away_for_two_seconds_gets_closer(self):
+        said = self.speak([far(t / 2) for t in range(0, 9)])           # 0-4 s på 0,43 m
+        self.assertEqual(said, [(2.0, ActionKind.HAND_FAR)])
+
+    def test_it_repeats_every_six_seconds_and_replaces_the_hints(self):
+        said = self.speak([far(t / 2) for t in range(0, 41)])          # 0-20 s
+        self.assertEqual(said, [(2.0, ActionKind.HAND_FAR), (8.0, ActionKind.HAND_FAR),
+                                (14.0, ActionKind.HAND_FAR), (20.0, ActionKind.HAND_FAR)])
+
+    def test_close_enough_gives_the_usual_hints(self):
+        said = self.speak([far(t / 2, 0.31) for t in range(0, 21)])     # 0-10 s på 0,31 m
+        self.assertEqual(said, [(4.0, ActionKind.NO_CODE), (10.0, ActionKind.NO_CODE_TURN)])
+
+    def test_the_two_seconds_start_over_when_the_hand_comes_closer(self):
+        frames = [far(0.0), far(1.0), far(1.5, 0.30), far(2.0), far(3.0), far(4.0)]
+        self.assertEqual(self.speak(frames), [(4.0, ActionKind.HAND_FAR)])   # 2 s efter 2,0, inte efter 0,0
+
+    def test_without_a_confirmed_hand_it_is_as_before(self):
+        said = self.speak([FrameObservation(t / 2, hand=False, hand_m=None) for t in range(0, 21)])
+        self.assertEqual(said, [(4.0, ActionKind.NO_CODE), (10.0, ActionKind.NO_CODE_TURN)])
+
+    def test_no_pip_while_waiting_to_repeat(self):
+        said = self.speak([far(t / 2) for t in range(0, 15)])          # 0-7 s
+        self.assertNotIn(ActionKind.CODE_SEEN, [k for _, k in said])
+
+    def test_a_thin_read_still_gets_the_aim_rules(self):
+        self.engine.update(far(0.0)); self.engine.update(far(1.0))
+        self.assertEqual(self.engine.update(far(2.0, 0.43, read(thin=True))).kind, ActionKind.CLOSER)
+
+    def test_a_reliable_read_waiting_for_its_second_gets_steady(self):
+        self.engine.update(far(0.0)); self.engine.update(far(1.0, 0.43, read()))
+        self.assertEqual(self.engine.update(far(2.0)).kind, ActionKind.STEADY)   # håll stilla vinner
+
+    def test_it_beats_a_seen_code_because_the_code_is_too_small_there(self):
+        self.engine.update(far(0.0)); self.engine.update(far(1.0))
+        self.assertEqual(self.engine.update(far(2.0, seen=((0.5, 0.5),))).kind, ActionKind.HAND_FAR)
+
+    def test_not_while_the_product_just_scanned_is_still_in_hand(self):
+        self.engine.update(frame(0.0, read())); self.engine.update(frame(0.5, read()))   # bekräftad
+        said = self.speak([far(1.0 + t / 2) for t in range(0, 12)])       # 1-6,5 s, före "redo"
+        self.assertEqual(said, [])
+
+    def test_after_next_product_it_works_again(self):
+        self.engine.update(frame(0.0, read())); self.engine.update(frame(0.5, read()))
+        self.assertEqual(self.engine.update(frame(8.5)).kind, ActionKind.READY)
+        self.assertEqual(self.engine.update(frame(13.5)).kind, ActionKind.NEXT_PRODUCT)
+        said = self.speak([far(14.0 + t / 2) for t in range(0, 7)])       # 14-17 s
+        self.assertEqual(said, [(16.0, ActionKind.HAND_FAR)])
+
+    def test_zero_turns_it_off(self):
+        self.engine = GuidanceEngine(CATALOG, GuidanceConfig(far_hand_m=0))
+        said = self.speak([far(t / 2) for t in range(0, 21)])
+        self.assertEqual(said, [(4.0, ActionKind.NO_CODE), (10.0, ActionKind.NO_CODE_TURN)])
+
+    def test_the_phrase(self):
+        from phrases import guidance_text
+        self.assertEqual(guidance_text("hand_far"), "Sakta närmare.")
+
+    def test_negative_values_are_errors(self):
+        for bad in ({"far_hand_m": -0.1}, {"far_hand_s": -1}, {"far_hand_repeat_s": -1}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                GuidanceConfig(**bad)
+
+    def test_old_logs_have_no_distance(self):
+        self.assertIsNone(FrameObservation(0.0).hand_m)
+
+
 class ConflictTest(unittest.TestCase):
     def setUp(self):
         self.engine = GuidanceEngine(CATALOG)

@@ -37,6 +37,7 @@ class ActionKind(Enum):
     NO_CODE_FLIP = "no_code_flip"          # ...vänd varan upp och ner (tredje tipset, sedan om igen)
     READY = "ready"                        # en stund efter en lyckad scanning: redo för nästa vara (Elias 5/11)
     NEXT_PRODUCT = "next_product"          # 5 s efter "redo" utan kod: håll nästa vara framför dig (Elias 10/11)
+    HAND_FAR = "hand_far"                  # ingen kod, och den bekräftade handen är för långt bort: sakta närmare (11/11)
     CODE_SEEN = "code_seen"                # ett kort pip, inget tal: en kod syns men är inte läsbar än
 
 
@@ -99,6 +100,8 @@ class FrameObservation:
                                       # Kan aldrig bekräfta en vara, bara vägleda. Gamla loggar: tom
     hand: bool = False                # handmodellen har bekräftat en hand de senaste 2 s (9/11). Bara då kan en
                                       # sedd kod starta en ny sökning efter "redo för nästa vara". Utan modell: False
+    hand_m: Optional[float] = None    # avståndet (m) till den bekräftade handen med varan (11/11). None utan
+                                      # bekräftad hand, utan handmodell och i gamla loggar
 
 
 @dataclass(frozen=True)

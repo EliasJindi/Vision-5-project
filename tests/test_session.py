@@ -35,11 +35,17 @@ class GuidanceSessionTest(unittest.TestCase):
     def test_seen_codes_and_the_hand_flag_reach_the_engine(self):
         session, _, _ = build()
         with mock.patch.object(session._engine, "update", return_value=None) as update:
-            session.on_frame(1.0, [], [(0.5, 0.9)], True)
+            session.on_frame(1.0, [], [(0.5, 0.9)], True, 0.43)
             session.on_frame(1.5, [])
         first, second = update.call_args_list[0].args[0], update.call_args_list[1].args[0]
-        self.assertEqual((first.seen, first.hand), (((0.5, 0.9),), True))
-        self.assertEqual((second.seen, second.hand), ((), False))         # som förut
+        self.assertEqual((first.seen, first.hand, first.hand_m), (((0.5, 0.9),), True, 0.43))
+        self.assertEqual((second.seen, second.hand, second.hand_m), ((), False, None))   # som förut
+
+    def test_a_far_hand_is_spoken_as_closer(self):
+        session, link, speaker = build()
+        actions = [session.on_frame(t / 2, [], (), True, 0.45) for t in range(0, 5)]
+        self.assertEqual([a.kind.value for a in actions if a], ["hand_far"])
+        self.assertEqual(link.of_type("guidance")[0]["text"], "Sakta närmare.")
 
     def test_the_same_product_scanned_again_is_not_added_twice(self):
         session, link, speaker = build()

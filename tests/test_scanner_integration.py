@@ -471,6 +471,26 @@ class ScannerMainTest(unittest.TestCase):
             self.run_scanner(blank=True)
         return [c.args[3] for c in session.on_frame.call_args_list]
 
+    def hand_distances(self, model, **kwargs):
+        import barcode_scanner
+        session = mock.Mock()
+        session.on_frame.return_value = None
+        with mock.patch.object(barcode_scanner, "make_detector", return_value=centre_detector()), \
+                mock.patch.object(barcode_scanner, "load_hand_model", return_value=(model, "")), \
+                mock.patch.object(barcode_scanner, "create_session", return_value=session):
+            self.run_scanner(blank=True, **kwargs)
+        return [c.args[4] for c in session.on_frame.call_args_list]
+
+    def test_the_distance_to_a_confirmed_hand_is_passed_on(self):
+        depth = np.full((720, 1280), 450, np.uint16)                       # allt på 0,45 m
+        distances = self.hand_distances(FakeHandModel(0.93), depth=depth)
+        self.assertEqual(len(distances), 6)
+        self.assertTrue(all(d is not None and abs(d - 0.45) < 0.02 for d in distances), distances)
+
+    def test_no_distance_without_a_confirmed_hand(self):
+        self.assertEqual(self.hand_distances(FakeHandModel(0.02)), [None] * 6)   # kanske bordet
+        self.assertEqual(self.hand_distances(None), [None] * 6)                  # utan modell
+
     def test_the_session_is_told_when_a_hand_is_confirmed(self):
         self.assertEqual(self.hand_flags(FakeHandModel(0.93)), [True] * 6)
         self.assertEqual(self.hand_flags(FakeHandModel(0.02)), [False] * 6)

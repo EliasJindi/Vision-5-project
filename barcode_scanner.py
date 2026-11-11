@@ -136,6 +136,10 @@
 # 41. Första tipset är "Håll varan nära, armbågen mot kroppen." i stället för "... en halv armlängd bort."
 #     (phrases.py). Mätt 11/11 med ättikan på stöd: 30 cm 97 och 95 % av bildrutorna godkända, 40 cm 0 och 0 %
 #     (2,56 mot 1,88 px/modul). En halv armlängd blev ca 40 cm i handen. Skannern själv är oförändrad. (2026-11-11)
+# 42. Syns ingen kod och är den bekräftade handen längre bort än 0,37 m i 2 s säger rösten "Sakta närmare."
+#     (högst var 6:e s, i stället för tipsen). Skannern skickar avståndet till handen (den blå rutan) till
+#     rösten, men bara när handmodellen bekräftat en hand: utan modell kan rutan vara bordet eller kroppen.
+#     Samma mätning som ändring 41: ättikan läses på 0,31 m men inte på 0,43 m. (2026-11-11)
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
@@ -845,7 +849,8 @@ def main():
                 recs = [handle_barcode(res, color, depth, products, log, now, mode, facit, stats, meta, args.filter)
                         for res in results]
                 hand_ok = hand_check is not None and gate.active(now)   # ändring 39: får starta en ny sökning
-                session.on_frame(now, recs, seen, hand_ok)   # röstvägledning och länk (ändring 29-31, 37), även utan läsning
+                hand_m = region.depth_m if hand_ok and region is not None else None   # ändring 42: "sakta närmare"
+                session.on_frame(now, recs, seen, hand_ok, hand_m)   # röstvägledning och länk (ändring 29-31, 37), även utan läsning
                 if now - started >= WARMUP_S:
                     stats["right_frames_kept"] += any(r.get("correct") and "tunn" not in r["filter"] for r in recs)
                     stats["tries"] += 1

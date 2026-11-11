@@ -39,18 +39,20 @@ class GuidanceSession:
         return self._basket
 
     def on_frame(self, t: float, records: Sequence[Mapping[str, Any]],
-                 seen: Sequence[Tuple[float, float]] = (), hand: bool = False) -> Optional[GuidanceAction]:
+                 seen: Sequence[Tuple[float, float]] = (), hand: bool = False,
+                 hand_m: Optional[float] = None) -> Optional[GuidanceAction]:
         """
         Anropas för varje avkodad bildruta, även när ingen kod syntes (records tom): motorn behöver
         tiden för att glömma gamla läsningar. records är loggraderna från handle_barcode().
         seen: mitten (0-1) på koder som detektorn ser men som inte gick att läsa (regel 3b).
         hand: handmodellen har bekräftat en hand de senaste 2 s (skannerns ändring 38).
+        hand_m: avståndet till den bekräftade handen i meter, annars None (skannerns ändring 42).
         """
         for rec in records:
             self._link.publish({**rec, "type": "read"})
         if self._engine is None:
             return None
-        action = self._engine.update(FrameObservation(t, self._reads(records), tuple(seen), hand))
+        action = self._engine.update(FrameObservation(t, self._reads(records), tuple(seen), hand, hand_m))
         if action is not None:
             # Bara kända varor läggs i korgen. "Okänd vara" kan vara en felläsning.
             in_basket = self._basket.add(action.ean, action.name) if action.kind is ActionKind.CONFIRMED else None
