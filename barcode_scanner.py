@@ -133,6 +133,9 @@
 #     tipsen i den glesa takten (voice_guidance/engine.py, next_after_ready_s). Provet 10/11 i lampljus:
 #     handmodellen bekräftade handen i 6 av 140 bildrutor, ingen sedd kod kunde starta sökningen (ändring 39)
 #     och rösten var tyst i 45 s. Elias: "helst efter 5 sekunder". Skannern själv är oförändrad. (2026-11-10)
+# 41. Första tipset är "Håll varan nära, armbågen mot kroppen." i stället för "... en halv armlängd bort."
+#     (phrases.py). Mätt 11/11 med ättikan på stöd: 30 cm 97 och 95 % av bildrutorna godkända, 40 cm 0 och 0 %
+#     (2,56 mot 1,88 px/modul). En halv armlängd blev ca 40 cm i handen. Skannern själv är oförändrad. (2026-11-11)
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
