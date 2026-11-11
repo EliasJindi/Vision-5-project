@@ -51,6 +51,7 @@ GUIDANCE_PHRASES = {
     "no_code_flip": "Vänd varan upp och ner.",                    # koden sitter ofta på botten
     "ready": "Redo för nästa vara.",
     "next_product": "Håll nästa vara framför dig.",                # 5 s efter "redo" utan kod (10/11)
+    "hand_far": "Sakta närmare.",    # ingen kod och handen längre bort än far_hand_m (11/11). Samma ord som closer
 }
 # Efter namnet, när varan lagts i korgen (voice_guidance/basket.py). Elias 5/11.
 BASKET_PHRASES = {
