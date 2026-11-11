@@ -17,8 +17,8 @@ Reglerna, i prioritetsordning (se docs/ROSTVAGLEDNING.md):
   3b. Ingen kod gick att läsa, men detektorn SER en streckkod (7/11, Elias: "vänd inte varan när den
      faktiskt hittar en etikett"): ligger den i kanten säg vart, annars "håll stilla". Bara under en
      sökning och när ingen vara är bekräftad. Detektorn kan aldrig bekräfta en vara.
-  4. Syns ingen kod alls på ett tag: korta tips i tur och ordning ("håll varan framför dig, en halv armlängd
-     bort", "vrid varan sakta", "vänd varan upp och ner"), först tätt och sedan glesare, utan slut tills en kod syns. Tystnad
+  4. Syns ingen kod alls på ett tag: korta tips i tur och ordning ("håll varan nära, armbågen mot
+     kroppen", "vrid varan sakta", "vänd varan upp och ner"), först tätt och sedan glesare, utan slut tills en kod syns. Tystnad
      lämnade användaren ensam i en minut (Elias, 4-5/11).
      Efter en lyckad scanning sägs i stället "redo för nästa vara" en gång, när varan varit borta en stund
      (användaren har då kanske ingen vara i handen, så "vänd varan" vore fel). Elias 5/11.

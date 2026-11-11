@@ -43,7 +43,10 @@ GUIDANCE_PHRASES = {
     "unknown_product": "Okänd vara.",
     # Ingen kod syns: tre tips i tur och ordning, sedan om igen. Elias 5/11: rösten ska blanda sig i mer,
     # och kommandona ska vara korta och enkla, eftersom användaren inte ser. Avstånd i armlängd, inte cm.
-    "no_code": "Håll varan framför dig, en halv armlängd bort.",   # läsningarna 4-5/11 kom på 18-45 cm
+    # "Håll varan framför dig, en halv armlängd bort." före 11/11. En halv armlängd blev ca 40 cm (0,38-0,46 m
+    # i körningarna 10-11/11), och där lästes ättikans kod i 0 % av bildrutorna (på stöd, två körningar); på
+    # 30 cm 95-97 %. Med armbågen mot kroppen höll testaren 0,28-0,38 m (DAG1, DAG2) och alla tre varorna lästes.
+    "no_code": "Håll varan nära, armbågen mot kroppen.",
     "no_code_turn": "Vrid varan sakta.",
     "no_code_flip": "Vänd varan upp och ner.",                    # koden sitter ofta på botten
     "ready": "Redo för nästa vara.",

@@ -32,7 +32,7 @@ class ActionKind(Enum):
     CODE_BELOW = "code_below"
     HOLD_STILL = "hold_still"              # två olika koder från samma ställe: osäkert
     STEADY = "steady"                      # koden är hittad och läst säkert en gång: stå still för den andra
-    NO_CODE = "no_code"                    # ingen kod på ett tag: håll varan framför dig, en halv armlängd bort
+    NO_CODE = "no_code"                    # ingen kod på ett tag: håll varan nära, armbågen mot kroppen (ca 30 cm)
     NO_CODE_TURN = "no_code_turn"          # ...vrid varan sakta (andra tipset)
     NO_CODE_FLIP = "no_code_flip"          # ...vänd varan upp och ner (tredje tipset, sedan om igen)
     READY = "ready"                        # en stund efter en lyckad scanning: redo för nästa vara (Elias 5/11)

@@ -98,6 +98,11 @@ class AudioManagerSpeakerTest(unittest.TestCase):
         AudioManagerSpeaker(audio=FakeAudio()).say("Lite närmare.", key="closer")
         self.assertEqual(calls, [("Lite närmare.", 3, "closer")])
 
+    def test_the_first_hint_asks_for_a_close_grip_not_half_an_arm(self):
+        # 11/11: en halv armlängd blev ca 40 cm, där ättikans kod inte lästes; på 30 cm 95-97 %.
+        from phrases import guidance_text
+        self.assertEqual(guidance_text("no_code"), "Håll varan nära, armbågen mot kroppen.")
+
     def test_cue_plays_a_ready_wav_with_a_short_shelf_life(self):
         import os
         import tempfile
