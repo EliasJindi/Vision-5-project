@@ -1,6 +1,6 @@
 # HANDOFF: Vision-5 (till nästa agent)
 
-Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätserien (avsnitt 3, 4, 6, 7 och 10). Avsnitt 7 reviderades därefter efter en genomgång med Elias (ny ordning, ingen deadlinepress). **Uppdaterad 2026-10-27** efter fokustesterna 18 och 20/10 och filtertestet 27/10 (avsnitt 0, 5, 6, 7, 9, 10 och nytt avsnitt 11 med arbetsloggarna som PDF i `docs/`). **Uppdaterad 2026-10-29** efter varutesterna (kaffefilter, Coca-Cola med EAN-8): avsnitt 3, 6, 7, 10 och 11. **Uppdaterad 2026-11-03** efter att röstvägledningen byggts (PR #16): avsnitt 1, 3, 7, 9, 10 och 11. **Uppdaterad 2026-11-05** efter de första proven med röst på Pi:n och felsökningen av kameran (Y-adaptern var trasig), PR #19–#28: avsnitt 0, 1, 3, 5, 6, 7, 9, 10 och 11. **Uppdaterad 2026-11-07** efter 6–7/11: USB 3 (kontaktens riktning), kamerans vinkel, "Sakta närmare."/"Håll stilla.", verktygen i `tools/` och fokus på handen (`--hand`), PR #31–#37: avsnitt 0, 1, 3, 6, 7, 9, 10 och 11. **Uppdaterad 2026-11-09** efter 7–9/11: regel 3b (detektorn), "Redo" efter 8 s, ordning i repot, handmodellen (MediaPipe i två steg) i skannern och att rösten inte tystnar efter "Redo", PR #40–#55: avsnitt 0, 1, 6, 7, 9, 10 och 11. Läs hela filen innan du gör något. Den beskriver vad projektet är, vad som är gjort, hur säkra vi är på varje resultat, vad som är på gång och **varför**. Filen innehåller medvetet inga rumsmått, koordinater, foton eller personnamn: repot är publikt.
+Skriven 2026-10-17 av föregående agent och uppdaterad samma dag efter mätserien (avsnitt 3, 4, 6, 7 och 10). Avsnitt 7 reviderades därefter efter en genomgång med Elias (ny ordning, ingen deadlinepress). **Uppdaterad 2026-10-27** efter fokustesterna 18 och 20/10 och filtertestet 27/10 (avsnitt 0, 5, 6, 7, 9, 10 och nytt avsnitt 11 med arbetsloggarna som PDF i `docs/`). **Uppdaterad 2026-10-29** efter varutesterna (kaffefilter, Coca-Cola med EAN-8): avsnitt 3, 6, 7, 10 och 11. **Uppdaterad 2026-11-03** efter att röstvägledningen byggts (PR #16): avsnitt 1, 3, 7, 9, 10 och 11. **Uppdaterad 2026-11-05** efter de första proven med röst på Pi:n och felsökningen av kameran (Y-adaptern var trasig), PR #19–#28: avsnitt 0, 1, 3, 5, 6, 7, 9, 10 och 11. **Uppdaterad 2026-11-07** efter 6–7/11: USB 3 (kontaktens riktning), kamerans vinkel, "Sakta närmare."/"Håll stilla.", verktygen i `tools/` och fokus på handen (`--hand`), PR #31–#37: avsnitt 0, 1, 3, 6, 7, 9, 10 och 11. **Uppdaterad 2026-11-09** efter 7–9/11: regel 3b (detektorn), "Redo" efter 8 s, ordning i repot, handmodellen (MediaPipe i två steg) i skannern och att rösten inte tystnar efter "Redo", PR #40–#55: avsnitt 0, 1, 6, 7, 9, 10 och 11. **Uppdaterad 2026-11-13** med examensarbetets datum (avsnitt 7, punkt 5). Status för 10–11/11 (ändring 40–42) står i arbetsloggarna i avsnitt 11, inte i avsnitt 6–7. Läs hela filen innan du gör något. Den beskriver vad projektet är, vad som är gjort, hur säkra vi är på varje resultat, vad som är på gång och **varför**. Filen innehåller medvetet inga rumsmått, koordinater, foton eller personnamn: repot är publikt.
 
 ---
 
@@ -283,6 +283,26 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
 3. Butikstest när tillstånd finns: utan `--diag` (inga bilder sparas), helst med batterikortet (18–23/11). Förfrågningar om butikstest och examensarbete är skickade till flera dagligvaruföretag; fråga Elias om svar.
 4. Hållare med fast vinkel ca 20° nedåt. Kameran pekade för högt i flera körningar även 7–9/11.
 5. **Examensarbetet:** kandidatexamen i Informatik (GIK28T, 15 hp), vecka 13–22 våren 2027, på plats. Frågeställning: "Hur kan djupseende, streckkodsläsning och röstvägledning kombineras för att en person utan syn självständigt ska kunna identifiera varor vid matinköp?" Före kursstart: handledare, metod (design science föreslagen), litteraturstudie, forskningsetik och test med frivilliga blinda och gravt synskadade (Elias: "jag tänker inte blunda och låtsas som att det räcker").
+   **Datum (kickoff 13/11, Högskolan Dalarna, "Thesis Spring 2027").** De första inlämningarna kommer före kursstart:
+
+   | Datum | Vad | Att tänka på |
+   |---|---|---|
+   | 8 jan 2027 | Lämna in grupp och preliminär titel | Ensam eller i grupp? Frågan ställd 13/11, inte besvarad |
+   | 29 jan | Lämna in projektidé | Frågeställningen finns redan |
+   | 5 feb | Presentation av projektidén ("Are your project ideas feasible?") | Visa systemet och siffrorna, t.ex. ättikan 98 s → 10 s (arbetsloggen 11/11) |
+   | 26 feb | Handledare och examinator fördelas; studenten kontaktar handledaren | Fråga direkt om GDPR (hälsouppgifter) och forskningsetik |
+   | 29 mars | Kursstart | |
+   | 31 mars | Lämna in projektbeskrivning | Två dagar efter kursstart: skriv den i mars |
+   | 25 april | Lämna in utkast till rapporten | Testerna med användare behöver vara gjorda före |
+   | 27–29 april | Halvtidspresentation (grupp, handledare, examinator) | |
+   | 19 maj | Lämna in slutrapport, checklista och blankett för författarnas bidrag; handledningen slutar, examinatorn tar över | |
+   | 23 maj | Lämna in oppositionsrapport | |
+   | 25–27 maj | Slutseminarium och opposition | Återkoppling på rapporten 3 dagar efter seminariet |
+   | 31 maj / 3 juni | Betygskommittén / återkoppling om betyg | |
+   | 11 juni | Lämna in rättad slutrapport | |
+   | 24 juni | Rapporter i DiVA, resultat i Ladok | |
+
+   **Planering bakåt (förslag 13/11, inte beslutat):** testerna med blinda och gravt synskadade behöver vara klara i början av april. Rekrytering, samtycke och frågan om hälsouppgifter i februari–mars. **Elias planerar att göra testerna tillsammans med Synskadades Riksförbund** (13/11). Det tekniska (stabilt system, headset, butikskarta, ett första butikstest) helst före jul.
 
 **Idéer som inte är byggda (samlade 9/11).** Finns sedan tidigare: Gemini hittar rätt vara bland liknande (punkt 6 under 7/11), Gemini som reserv när ingen kod syns, t.ex. "vänd paketet" (punkt 8 nedan), rösten guidar efter handen även utan kod ("Lyft varan lite."), hyllkantsetiketter, en AI-agent med verktyg, hållare med fast vinkel (CAD). Nya:
 - **Zoom:** när detektorn ser en kod som inte går att läsa skärs den ut, förstoras 2 gånger och läses igen. Räddade 2 av 14 bilder i en mätning (`tools/streckkod.py`); vilka koder som lästes är inte kontrollerat (felläsningar?). Inte inbyggt.
