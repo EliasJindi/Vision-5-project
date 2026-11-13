@@ -127,6 +127,8 @@ Texten (1–120 tecken, inga styrtecken) läses upp via `audio_manager` på **ni
 - Flera klienter går bra, alla får samma händelser.
 - Ändras protokollet höjs `protocol` i `hello`.
 
+**Ett exempel på en klient: `tools/knappar.py`** (13/11, steg 1 av dialogen med användaren, HANDOFF avsnitt 7). Den lyssnar på `guidance`-händelserna och svarar på tangenter från laptopen med `say`: mellanslag upprepar senaste beskedet, S säger senaste varan, K vad som finns i korgen, H hjälpen. Ingen AI och inget nät, och skannern ändras inte. Kör skannern med `--lank 5555` och `python3 tools/knappar.py` i en andra terminal, innan varor läggs i korgen.
+
 **Att ta över vägledningen i C#:** kör `--lank 5555` **utan** `--vagledning`. Då skickar Python bara `read`-händelser, och C# bestämmer vad som sägs och skickar `say`. Pythons `GuidanceEngine` är då **specifikationen**: reglerna ovan, `tests/test_engine.py` (varje regel är ett testfall) och `replay.py` (kör en regeluppsättning mot ~1 500 verkliga läsningar). Portar reglerna och ta samma testfall.
 
 **Ska stanna i Python oavsett:** kamera och avkodning (uppmätta med zxing-cpp, en annan avkodare ger andra gränser), filtren i `scan_filters.py`, och allt som rör **säkerhet** (hinder, bilar, trappor), som ska vara lokalt och snabbt och inte bero på att ett annat program lever.

@@ -16,7 +16,7 @@ Den här filen visar vad som finns var. Hela bakgrunden, resultaten och nästa s
 | `audio_manager.py`, `tts_engine.py`, `phrases.py` | Ljudkö, talsyntes (Piper) och alla fraser |
 | `gemini_service.py`, `telemetry_logger.py` | Gemini-anrop och mätning av ström och temperatur |
 | `analyze_scans.py`, `analyze_telemetry.py`, `measure_phrases.py` | Analys av loggar och fraslängd |
-| `tools/` | Hjälpverktyg: USB-test, siktebild, mosaik av en körning, handtest, mätning av streckkodsdetektorn och av handmodellen (`handmodell.py`) |
+| `tools/` | Hjälpverktyg: USB-test, siktebild, mosaik av en körning, handtest, mätning av streckkodsdetektorn och av handmodellen (`handmodell.py`), knappar från laptopen (`knappar.py`: upprepa, senaste varan, korgen) |
 | `tests/` | Enhetstester |
 | `docs/` | `ROSTVAGLEDNING.md` (regler och protokoll). `docs/rapporter/` har arbetsloggarna som PDF, nyast först i [listan](docs/rapporter/README.md) |
 | `ej_anvant/` | Gammalt som inte används. Ligger i `.gitignore` |

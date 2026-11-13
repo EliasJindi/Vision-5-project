@@ -315,6 +315,8 @@ Från 15/10 (före `--facit`, mindre underlag): 4K stabilt på 0,38 m och 0,53 m
   - **Regler som gäller även här:** säkerhet aldrig via agenten, och ett varunamn sägs bara när streckkoden bekräftat det (en AI kan hitta på). Nät är ofta dåligt inne i butiker; varje fråga kostar; bilder till molnet kan visa andra kunder.
   - **Förslag i tre steg (inte beslutat i detalj):** 1. Knappar från laptopen utan AI: "Upprepa", "Vad var det senaste?", "Vad har jag i korgen?". 2. Användaren byter strategi med en knapp ("jag har den nära" → tipsen om att vrida och vända). 3. En agent för fria frågor via länken (`--lank`, som byggdes för just ett sådant program) och Gemini (`gemini_service.py`).
   - **Mät först:** fråga några personer (förbundet) vad de vill kunna fråga, och om de föredrar knappar eller röst. Rita interaktionen på papper (knappar, vad var och en gör, vad rösten svarar).
+  - **Steg 1 byggt 13/11 (Elias: "kör steg 1"): `tools/knappar.py`**, inte prövat på Pi:n. Mellanslag upprepar senaste beskedet, S senaste varan, K korgen, H hjälpen, Q avslutar. Lyssnar på länken och svarar med `say`; skannern är oförändrad. Starta skannern med `--lank 5555` och knapparna i en andra terminal, innan varor läggs i korgen (annars saknas de i korgen). Fraserna genereras första gången de sägs (ca 0,5 s).
+  - **AI-modellen i molnet, programmet på Pi:n** (Elias frågade 13/11 varför inte allt i molnet): AI:n (Gemini) körs i molnet i steg 3 och belastar inte Pi:n. Det som avråds från är en egen server i molnet: länken lyssnar bara på Pi:n själv av säkerhetsskäl, och fler delar kan gå sönder.
   - **Inget molnkonto behövs för att börja** (Claudes bedömning 13/11): steg 1–2 går att bygga och testa med låtsade händelser utan Pi:n, och programmet körs sedan bredvid skannern på Pi:n eller laptopen. En egen server i molnet ger kostnad, nycklar att skydda och bilder som lämnar huset.
 
 **Status 7/11: fokus på handen fungerar (PR #31–#37).** `--hand` ställer linsen efter handens avstånd och gav ungefär tre gånger så många läsningar. Arbetslogg: `docs/rapporter/Vision5_handen_och_fokus_2026-11-07.pdf`. **Nästa steg, i ordning:**
@@ -438,6 +440,8 @@ python3 tts_engine.py --prewarm                                 # förgenerera t
 clear && sleep 5 && python3 tools/handmodell.py --sekunder 40 --namn vara1   # hittar handmodellen handen? logs/handmodell_vara1.jpg
 python3 barcode_scanner.py --4k --vagledning tal --sikte hand --filter --utan-handmodell   # utan handmodellen (som före 9/11)
 python3 -m json.tool kartor/produkter.geojson > /dev/null && echo "kartan ok"   # är kartan rätt skriven?
+python3 barcode_scanner.py --4k --vagledning tal --sikte hand --filter --lank 5555   # med länken, för knapparna
+python3 tools/knappar.py                                        # i en andra terminal: mellanslag upprepa, S senaste, K korgen, H hjälp
 PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -t .   # testerna utan förkompilerade filer (efter mutationstest)
 ```
 
