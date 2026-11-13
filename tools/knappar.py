@@ -6,6 +6,9 @@
 #   Terminal 1:  python3 barcode_scanner.py --4k --vagledning tal --sikte hand --filter --lank 5555
 #   Terminal 2:  python3 tools/knappar.py        (starta den innan varor läggs i korgen)
 # Tangenter: mellanslag = upprepa, S = senaste varan, K = korgen, H = hjälp, Q = avsluta.
+# 13/11 kväll: svaren är hela meningar utan kolon, och bokstäverna i hjälpen stavas som de låter ("Ess",
+# "Kå", "Hå"). Elias provlyssnade på Pi:n: "Senast: Tomatpure." och "S, senaste varan." lät konstigt,
+# "Senaste varan var Tomatpure, 500 gram." och "Ess, senaste varan." mycket bättre.
 # =========================================================================
 import argparse
 import json
@@ -21,8 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 from voice_guidance.link import MAX_SAY_CHARS   # noqa: E402
 
 CUE_TEXT = "♪"   # pipet (voice_guidance.voice), inget att upprepa
-NUMBERS = {2: "Två", 3: "Tre", 4: "Fyra", 5: "Fem", 6: "Sex", 7: "Sju", 8: "Åtta", 9: "Nio", 10: "Tio"}
-HELP = "Mellanslag upprepar. S, senaste varan. K, korgen. H, hjälp."
+NUMBERS = {2: "två", 3: "tre", 4: "fyra", 5: "fem", 6: "sex", 7: "sju", 8: "åtta", 9: "nio", 10: "tio"}
+HELP = "Mellanslag, hör igen. Ess, senaste varan. Kå, korgen. Hå, hjälp."   # bokstäverna stavade som de låter
 KEYS = {" ": "repeat", "s": "last", "k": "basket", "h": "help"}
 
 
@@ -55,12 +58,12 @@ class ButtonState:
             self.last_text = text.strip()
         action = event.get("action")
         if action == "confirmed" and event.get("name"):
-            details = [d for d in (event.get("details") or []) if isinstance(d, str) and d.strip()]
-            self.last_product = " ".join(_sentence(p) for p in [event["name"], *details])
+            details = [d.strip().rstrip(".") for d in (event.get("details") or []) if isinstance(d, str) and d.strip()]
+            self.last_product = ", ".join([str(event["name"]).strip().rstrip("."), *details])
             if event.get("basket") == "added" and event.get("ean"):
                 self._basket.setdefault(str(event["ean"]), str(event["name"]))
         elif action == "unknown_product":
-            self.last_product = "Okänd vara."
+            self.last_product = "en okänd vara"
 
     def basket(self) -> List[str]:
         return list(self._basket.values())
@@ -69,7 +72,7 @@ class ButtonState:
         if what == "repeat":
             return _fit(self.last_text) if self.last_text else "Inget att upprepa än."
         if what == "last":
-            return _fit(f"Senast: {self.last_product}") if self.last_product else "Ingen vara än."
+            return _fit(_sentence(f"Senaste varan var {self.last_product}")) if self.last_product else "Ingen vara är skannad än."
         if what == "basket":
             return basket_text(self.basket())
         if what == "help":
@@ -78,11 +81,14 @@ class ButtonState:
 
 
 def basket_text(names: List[str], limit: int = MAX_SAY_CHARS) -> str:
-    """"Korgen är tom.", "En vara: Tomatpure.", "Två varor: Tomatpure och Linser." Ryms alltid i limit."""
+    """"Korgen är tom.", "Du har Tomatpure i korgen.", "Du har två varor i korgen, Tomatpure och Linser."
+    Ryms alltid i limit."""
     n = len(names)
     if n == 0:
         return "Korgen är tom."
-    head = "En vara" if n == 1 else f"{NUMBERS.get(n, str(n))} varor"
+    if n == 1:
+        return _fit(f"Du har {names[0]} i korgen.", limit)
+    head = f"Du har {NUMBERS.get(n, str(n))} varor i korgen"
     for shown in range(n, 0, -1):
         rest = n - shown
         listed = names[:shown]
@@ -92,10 +98,10 @@ def basket_text(names: List[str], limit: int = MAX_SAY_CHARS) -> str:
             body = ", ".join(listed[:-1]) + " och " + listed[-1]
         else:
             body = listed[0]
-        text = f"{head}: {body}."
+        text = f"{head}, {body}."
         if len(text) <= limit:
             return text
-    return _fit(f"{head} i korgen.", limit)
+    return _fit(f"{head}.", limit)
 
 
 class LinkClient:
