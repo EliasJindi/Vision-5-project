@@ -387,6 +387,30 @@ def far(t, hand_m=0.43, *reads, seen=()):
     return FrameObservation(t, tuple(reads), tuple(seen), hand=True, hand_m=hand_m)
 
 
+class LongSearchTest(unittest.TestCase):
+    """13/11, ändring 44: en sedd kod efter en lång sökning får inte ge en lång tystnad."""
+
+    def speak(self, engine, frames):
+        return [(obs.t, a.kind) for obs in frames if (a := engine.update(obs))]
+
+    def test_a_seen_code_after_a_long_search_gives_the_first_hint_after_eight_seconds(self):
+        engine = GuidanceEngine(CATALOG)
+        before = self.speak(engine, [frame(t / 2) for t in range(0, 207)])          # 0-103 s utan kod: elva tips
+        self.assertEqual(len([k for _, k in before if k in (ActionKind.NO_CODE, ActionKind.NO_CODE_TURN,
+                                                            ActionKind.NO_CODE_FLIP)]), 11)
+        self.assertEqual(engine.update(FrameObservation(103.5, (), ((0.5, 0.9),), hand=True)).kind,
+                         ActionKind.CODE_BELOW)                                     # "Lite uppåt." som 21:43:45
+        after = self.speak(engine, [frame(104.0 + t / 2) for t in range(0, 60)])     # 104-133,5 s
+        self.assertEqual(after[0], (111.5, ActionKind.NO_CODE))                     # 8 s, inte 110 s
+
+    def test_a_read_after_a_long_search_restarts_the_hints_the_same_way(self):
+        engine = GuidanceEngine(CATALOG)
+        self.speak(engine, [frame(t / 2) for t in range(0, 207)])
+        engine.update(frame(103.5, read(EAN_B, thin=True)))
+        after = self.speak(engine, [frame(104.0 + t / 2) for t in range(0, 60)])
+        self.assertEqual(after[0], (111.5, ActionKind.NO_CODE))
+
+
 class FarHandTest(unittest.TestCase):
     """11/11, regel 4b: ingen kod och den bekräftade handen för långt bort i 2 s: "sakta närmare"."""
 

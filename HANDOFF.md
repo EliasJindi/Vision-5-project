@@ -442,6 +442,7 @@ python3 barcode_scanner.py --4k --vagledning tal --sikte hand --filter --utan-ha
 python3 -m json.tool kartor/produkter.geojson > /dev/null && echo "kartan ok"   # är kartan rätt skriven?
 python3 barcode_scanner.py --4k --vagledning tal --sikte hand --filter --lank 5555   # med länken, för knapparna
 python3 tools/knappar.py                                        # i en andra terminal: mellanslag upprepa, S senaste, K korgen, H hjälp
+python3 tools/lyssna.py "Senaste varan var Tomatpure, 500 gram."   # provlyssna en fras utan kameran (--knappar, --fraser)
 PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -t .   # testerna utan förkompilerade filer (efter mutationstest)
 ```
 

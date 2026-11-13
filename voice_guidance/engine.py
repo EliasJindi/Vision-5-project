@@ -35,6 +35,8 @@ Reglerna, i prioritetsordning (se docs/ROSTVAGLEDNING.md):
      strax efter "håll stilla" fick användaren att flytta sig från ett läge där koden syntes (NARA2, NARA4).
      (B) En tunn läsning när varan redan är högst 0,30 m bort ger "håll stilla" i stället för "närmare": på
      0,26-0,27 m och 3,0 px/modul är koden inte för liten, bara en remsa av den lästes (NARA4).
+     Rättat 13/11 (ändring 44): en kod som läses eller syns startar om både klockan och räkningen för tipsen.
+     Förut kunde en sedd kod efter en lång sökning ge upp till 110 s tystnad.
   4b. 11/11: syns ingen kod och är den bekräftade handen (handmodellen) längre bort än far_hand_m i far_hand_s,
      säg "sakta närmare" i stället för tipsen. Mätt med ättikan på stöd: 30 cm 95-97 % av bildrutorna godkända,
      40 cm 0 %. Rösten kunde förut bara säga "närmare" när en kod lästes tunt, och på 40 cm lästes ofta ingen.
@@ -362,6 +364,10 @@ class GuidanceEngine:
             self._ready_said = False
         if obs.reads or self._sees_new_code(obs):
             self._code_in_search = True   # A: tipsen väntar längre, användaren har hittat koden en gång
+            # Rättelse 13/11 (ändring 44): när klockan börjar om ska räkningen också göra det. Förut fortsatte
+            # räkningen, och efter elva tips (100 s utan kod) räknade motorn ut att nästa tips skulle komma 110 s
+            # efter en sedd kod. Körningen 13/11 21:43:45: "Lite uppåt.", sedan tyst tills den avbröts.
+            self._no_code_said = 0
         if self._search_since is None or obs.reads or self._sees_new_code(obs):
             self._search_since = obs.t   # en kod som syns (läst eller bara sedd) betyder att sökningen går framåt
 
