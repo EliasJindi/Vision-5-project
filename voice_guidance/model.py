@@ -58,6 +58,7 @@ class CodeRead:
     ean: Optional[str]        # giltig EAN, eller None om kontrollsumman inte stämde
     center: Point             # kodens mitt, normaliserad: (0,0) = övre vänstra hörnet, (1,1) = nedre högra
     thin: bool                # läsningen kommer från en tunn remsa av koden (se scan_filters.is_thin)
+    distance_m: Optional[float] = None   # avståndet till koden enligt djupet (loggradens "distance_m"), om det finns
 
     @property
     def reliable(self) -> bool:
@@ -83,9 +84,12 @@ class CodeRead:
                 width, height = size_from_corners(*corners)
                 thin = width <= 0 or is_thin(height / width)
             ean = rec.get("ean")
+            dist = rec.get("distance_m")
+            distance_m = float(dist) if isinstance(dist, (int, float)) and not isinstance(dist, bool) and dist > 0 else None
         except (KeyError, TypeError) as e:
             raise ValueError(f"loggraden saknar eller har trasigt fält: {e!r}") from e
-        return cls(ean=str(ean) if ean else None, center=(_clamp01(cx), _clamp01(cy)), thin=thin)
+        return cls(ean=str(ean) if ean else None, center=(_clamp01(cx), _clamp01(cy)), thin=thin,
+                   distance_m=distance_m)
 
     def distance_from_center(self) -> float:
         return math.dist(self.center, IMAGE_CENTER)

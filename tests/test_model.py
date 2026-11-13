@@ -6,6 +6,13 @@ from tests.helpers import EAN_A, FULL_CORNERS, THIN_CORNERS, record
 
 
 class CodeReadFromRecordTest(unittest.TestCase):
+    def test_the_distance_is_read_from_the_record(self):
+        from tests.helpers import record
+        self.assertEqual(CodeRead.from_record({**record(1.0), "distance_m": 0.27}).distance_m, 0.27)
+        self.assertIsNone(CodeRead.from_record(record(1.0)).distance_m)                 # gamla loggar
+        self.assertIsNone(CodeRead.from_record({**record(1.0), "distance_m": None}).distance_m)
+        self.assertIsNone(CodeRead.from_record({**record(1.0), "distance_m": "x"}).distance_m)
+
     def test_full_code_is_reliable_and_centered_in_frame(self):
         read = CodeRead.from_record(record(1.0, corners=FULL_CORNERS, filter=[]))
         self.assertEqual(read.ean, EAN_A)

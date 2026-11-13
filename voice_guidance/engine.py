@@ -30,6 +30,11 @@ Reglerna, i prioritetsordning (se docs/ROSTVAGLEDNING.md):
      10/11: har ingen kod syntes 5 s efter "redo" börjar en ny sökning ändå: "håll nästa vara framför dig",
      sedan tipsen i den glesa takten. Provet 10/11 i lampljus: handmodellen bekräftade handen i 4 % av
      bildrutorna, ingen sedd kod startade sökningen och rösten var tyst i 45 s (Elias: "helst efter 5 sekunder").
+  Rättat 13/11 (ändring 43): (A) efter att en kod har lästs eller setts i sökningen kommer det första tipset
+     efter 8 s i stället för 4 s. Vid läsgränsen kommer läsningarna med 3-7 s mellanrum, och "håll varan nära"
+     strax efter "håll stilla" fick användaren att flytta sig från ett läge där koden syntes (NARA2, NARA4).
+     (B) En tunn läsning när varan redan är högst 0,30 m bort ger "håll stilla" i stället för "närmare": på
+     0,26-0,27 m och 3,0 px/modul är koden inte för liten, bara en remsa av den lästes (NARA4).
   4b. 11/11: syns ingen kod och är den bekräftade handen (handmodellen) längre bort än far_hand_m i far_hand_s,
      säg "sakta närmare" i stället för tipsen. Mätt med ättikan på stöd: 30 cm 95-97 % av bildrutorna godkända,
      40 cm 0 %. Rösten kunde förut bara säga "närmare" när en kod lästes tunt, och på 40 cm lästes ofta ingen.
@@ -82,6 +87,9 @@ class GuidanceConfig:
     far_hand_m: float = 0.37         # ingen kod och handen längre bort än så: "sakta närmare" (0 = av). Ättikan 11/11: 0,31 m läses, 0,43 m inte
     far_hand_s: float = 2.0          # ...så här länge i följd, så att en arm i rörelse inte ger röst
     far_hand_repeat_s: float = 6.0   # ...och högst så här ofta. Under tiden inga andra tips om "ingen kod"
+    no_code_after_code_s: float = 8.0   # första tipset efter att en kod lästs eller setts i sökningen (A, 13/11). 4 s gav
+                                        # "håll varan nära" strax efter "håll stilla" (NARA2, NARA4). Lika med no_code_after_s = som förut
+    near_enough_m: float = 0.30      # tunn läsning så här nära eller närmare: "håll stilla", inte "närmare" (B, 13/11; 0 = av)
     steady_after_s: float = 0.9      # "håll stilla" om den andra säkra läsningen dröjer så här länge (0 = aldrig)
     cue_interval_s: float = 1.0      # pip när en osäker kod syns men talet hålls tillbaka, högst så här ofta (0 = av)
     cue_quiet_s: float = 1.2         # inget pip så här snart efter tal, så att pipet inte hamnar mitt i en fras
@@ -92,9 +100,12 @@ class GuidanceConfig:
         if self.no_code_fast < 0 or self.no_code_slow_repeat_s < 0:
             raise ValueError("no_code_fast och no_code_slow_repeat_s får inte vara negativa")
         if min(self.cue_interval_s, self.cue_quiet_s, self.ready_after_s, self.steady_after_s,
-               self.next_after_ready_s, self.far_hand_m, self.far_hand_s, self.far_hand_repeat_s) < 0:
-            raise ValueError("cue_interval_s, cue_quiet_s, ready_after_s, steady_after_s, next_after_ready_s och "
-                             "far_hand_* får inte vara negativa")
+               self.next_after_ready_s, self.far_hand_m, self.far_hand_s, self.far_hand_repeat_s,
+               self.near_enough_m) < 0:
+            raise ValueError("cue_interval_s, cue_quiet_s, ready_after_s, steady_after_s, next_after_ready_s, "
+                             "far_hand_* och near_enough_m får inte vara negativa")
+        if self.no_code_after_code_s < self.no_code_after_s:
+            raise ValueError("no_code_after_code_s får inte vara kortare än no_code_after_s")
         for name in ("confirm_window_s", "lost_after_s", "conflict_window_s", "conflict_radius",
                      "conflict_hold_s", "conflict_escalate_s", "min_interval_s", "repeat_after_s",
                      "no_code_after_s", "no_code_repeat_s"):
@@ -129,6 +140,8 @@ class GuidanceEngine:
         self._ready_said = False                      # "redo" är sagt: en sedd kod i en bekräftad hand startar en ny sökning
         self._ready_at = _NEVER                       # när "redo" sades (10/11: ny sökning efter next_after_ready_s)
         self._far_since: Optional[float] = None       # sedan när den bekräftade handen varit för långt bort (11/11)
+        self._code_in_search = False                  # en kod har lästs eller setts i den här sökningen (A, 13/11)
+        self._aimed = False                           # beslutet kom från regel 3 (osäker kod): pip om talet hålls tillbaka
 
     @property
     def config(self) -> GuidanceConfig:
@@ -145,7 +158,7 @@ class GuidanceEngine:
             self._note_conflict(t)
         decided = self._decide(obs, conflict)
         action = self._admit(decided, t)
-        if action is None and decided is not None and decided.kind in _AIMS and not conflict:
+        if action is None and decided is not None and (decided.kind in _AIMS or self._aimed) and not conflict:
             action = self._cue(t)   # talet hölls tillbaka av takten: pipa i stället
         return action
 
@@ -166,6 +179,7 @@ class GuidanceEngine:
 
     # ---------- beslut ----------
     def _decide(self, obs: FrameObservation, conflict: bool) -> Optional[GuidanceAction]:
+        self._aimed = False
         if conflict:
             # Har användaren redan fått varan bekräftad är en ny avvikande läsning troligen en felläsning.
             if self._confirmed:
@@ -194,7 +208,8 @@ class GuidanceEngine:
             return self._no_code_prompt(obs.t)
         if self._confirmed or any(r.reliable for r in obs.reads):
             return None   # redan bekräftad, eller en säker läsning som väntar på sin andra röst
-        return self._aim(obs.reads)
+        self._aimed = True
+        return self._aim(obs)
 
     def _steady_prompt(self, t: float) -> Optional[GuidanceAction]:
         """En säker läsning av en ny vara väntar på sin andra och den dröjer: be användaren stå still.
@@ -257,14 +272,17 @@ class GuidanceEngine:
     def _no_code_due(self, n: int) -> Optional[float]:
         """Sekunder utan kod innan tips nummer n (0 = första). None = inga fler tips."""
         cfg = self._cfg
+        # A (13/11): har en kod lästs eller setts i sökningen skjuts alla tips upp lika mycket, så att takten mellan
+        # dem är densamma men det första kommer efter no_code_after_code_s.
+        start = cfg.no_code_after_code_s if self._code_in_search else cfg.no_code_after_s
         if n < cfg.no_code_fast:
-            return cfg.no_code_after_s + n * cfg.no_code_repeat_s
+            return start + n * cfg.no_code_repeat_s
         if cfg.no_code_slow_repeat_s == 0:
             return None
         if cfg.no_code_fast:
-            first_slow = cfg.no_code_after_s + (cfg.no_code_fast - 1) * cfg.no_code_repeat_s + cfg.no_code_slow_repeat_s
+            first_slow = start + (cfg.no_code_fast - 1) * cfg.no_code_repeat_s + cfg.no_code_slow_repeat_s
         else:
-            first_slow = cfg.no_code_after_s
+            first_slow = start
         return first_slow + (n - cfg.no_code_fast) * cfg.no_code_slow_repeat_s
 
     def _ready_to_confirm(self) -> Optional[str]:
@@ -272,9 +290,14 @@ class GuidanceEngine:
                  if len(v) >= self._cfg.confirm_reads and ean not in self._confirmed]
         return max(ready)[2] if ready else None
 
-    def _aim(self, reads: Sequence[CodeRead]) -> GuidanceAction:
-        """Koden syns men är osäker. Ligger den i kanten: säg vart. Annars: närmare."""
-        return self._direction([r.center for r in reads], ActionKind.CLOSER)
+    def _aim(self, obs: FrameObservation) -> GuidanceAction:
+        """Koden syns men är osäker. Ligger den i kanten: säg vart. Annars: närmare, eller håll stilla om varan
+        redan är nära (B, 13/11). Avståndet är kodens eget, annars den bekräftade handens."""
+        near = self._cfg.near_enough_m
+        dists = [r.distance_m for r in obs.reads if r.distance_m is not None]
+        dist = min(dists) if dists else obs.hand_m
+        centered = ActionKind.STEADY if near and dist is not None and dist <= near else ActionKind.CLOSER
+        return self._direction([r.center for r in obs.reads], centered)
 
     def _sees_new_code(self, obs: FrameObservation) -> bool:
         """Detektorn ser en kod under en pågående sökning (inte efter en lyckad scanning)."""
@@ -337,6 +360,8 @@ class GuidanceEngine:
             self._searching = True
             self._ready_pending = False
             self._ready_said = False
+        if obs.reads or self._sees_new_code(obs):
+            self._code_in_search = True   # A: tipsen väntar längre, användaren har hittat koden en gång
         if self._search_since is None or obs.reads or self._sees_new_code(obs):
             self._search_since = obs.t   # en kod som syns (läst eller bara sedd) betyder att sökningen går framåt
 
