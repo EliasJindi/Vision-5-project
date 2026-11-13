@@ -145,6 +145,9 @@
 #        3 s senare "håll varan nära", tre gånger). B. En tunn läsning högst 0,30 m bort (kodens djup, annars
 #        handens) ger "håll stilla" i stället för "sakta närmare" (NARA4: tre gånger "närmare" på 0,26-0,27 m och
 #        3,0 px/modul). Skannern själv är oförändrad: loggraden har redan "distance_m". (2026-11-13)
+# 44. Rättelse (voice_guidance/engine.py): en kod som läses eller syns startar om både klockan och
+#     räkningen för tipsen. Förut startade bara klockan om, och en sedd kod efter elva tips (100 s utan kod)
+#     gav 110 s tystnad (körningen 13/11 21:43:45). Simulerat efter rättelsen: 8 s. (2026-11-13)
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.
