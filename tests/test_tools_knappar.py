@@ -22,7 +22,7 @@ class AnswerTest(unittest.TestCase):
 
     def test_before_anything_has_happened(self):
         self.assertEqual(self.state.answer("repeat"), "Inget att upprepa än.")
-        self.assertEqual(self.state.answer("last"), "Ingen vara än.")
+        self.assertEqual(self.state.answer("last"), "Ingen vara är skannad än.")
         self.assertEqual(self.state.answer("basket"), "Korgen är tom.")
 
     def test_repeat_gives_the_last_spoken_text_but_never_the_pip(self):
@@ -37,30 +37,39 @@ class AnswerTest(unittest.TestCase):
 
     def test_last_product_with_details(self):
         self.state.on_event(confirmed("7340083497834", "Tomatpure", ["500 gram"]))
-        self.assertEqual(self.state.answer("last"), "Senast: Tomatpure. 500 gram.")
+        self.assertEqual(self.state.answer("last"), "Senaste varan var Tomatpure, 500 gram.")
 
     def test_last_product_unknown(self):
         self.state.on_event({"type": "guidance", "action": "unknown_product", "ean": "7331642037042",
                              "name": None, "text": "Okänd vara."})
-        self.assertEqual(self.state.answer("last"), "Senast: Okänd vara.")
+        self.assertEqual(self.state.answer("last"), "Senaste varan var en okänd vara.")
         self.assertEqual(self.state.answer("basket"), "Korgen är tom.")             # okända varor läggs aldrig i korgen
 
     def test_basket_counts_each_product_once(self):
         self.state.on_event(confirmed("1", "Tomatpure"))
         self.state.on_event(confirmed("2", "Linser"))
         self.state.on_event(confirmed("1", "Tomatpure", basket="already"))          # "finns redan i korgen"
-        self.assertEqual(self.state.answer("basket"), "Två varor: Tomatpure och Linser.")
+        self.assertEqual(self.state.answer("basket"), "Du har två varor i korgen, Tomatpure och Linser.")
 
     def test_basket_wording(self):
-        self.assertEqual(basket_text(["Tomatpure"]), "En vara: Tomatpure.")
-        self.assertEqual(basket_text(["A", "B", "C"]), "Tre varor: A, B och C.")
-        self.assertEqual(basket_text([f"V{i}" for i in range(12)])[:9], "12 varor:")
+        self.assertEqual(basket_text(["Tomatpure"]), "Du har Tomatpure i korgen.")
+        self.assertEqual(basket_text(["A", "B", "C"]), "Du har tre varor i korgen, A, B och C.")
+        self.assertTrue(basket_text([f"V{i}" for i in range(12)]).startswith("Du har 12 varor i korgen, "))
+
+    def test_no_colons_and_no_lone_letters(self):
+        # 13/11: kolon och ensamma bokstäver lät konstigt uppläst
+        self.state.on_event(confirmed("1", "Tomatpure", ["500 gram"]))
+        self.state.on_event(confirmed("2", "Linser"))
+        for what in ("last", "basket", "help", "repeat"):
+            with self.subTest(what=what):
+                self.assertNotIn(":", self.state.answer(what))
+        self.assertEqual(self.state.answer("help"), "Mellanslag, hör igen. Ess, senaste varan. Kå, korgen. Hå, hjälp.")
 
     def test_a_long_basket_always_fits_the_link(self):
         names = [f"Ekologisk krossad tomat {i}" for i in range(15)]
         text = basket_text(names)
         self.assertLessEqual(len(text), MAX_SAY_CHARS)
-        self.assertTrue(text.startswith("15 varor: Ekologisk krossad tomat 0"), text)
+        self.assertTrue(text.startswith("Du har 15 varor i korgen, Ekologisk krossad tomat 0"), text)
         self.assertIn("till.", text)
 
     def test_help_fits_the_link(self):
@@ -110,10 +119,11 @@ class ThroughTheLinkTest(unittest.TestCase):
         self.pump(lambda: self.link._clients)                                       # klienten är ansluten
         self.link.publish(confirmed("7340083497834", "Tomatpure", ["500 gram"]))
         self.pump(lambda: self.state.last_product)
-        self.assertEqual(self.press("K"), "En vara: Tomatpure.")
-        self.assertEqual(self.press("s"), "Senast: Tomatpure. 500 gram.")
+        self.assertEqual(self.press("K"), "Du har Tomatpure i korgen.")
+        self.assertEqual(self.press("s"), "Senaste varan var Tomatpure, 500 gram.")
         self.assertEqual(self.press(" "), "Tomatpure. Tillagd.")
-        self.assertEqual(self.said, ["En vara: Tomatpure.", "Senast: Tomatpure. 500 gram.", "Tomatpure. Tillagd."])
+        self.assertEqual(self.said, ["Du har Tomatpure i korgen.", "Senaste varan var Tomatpure, 500 gram.",
+                                     "Tomatpure. Tillagd."])
 
     def test_other_keys_send_nothing(self):
         self.assertIsNone(handle_key(self.client, self.state, "x"))
