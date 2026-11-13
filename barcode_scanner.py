@@ -140,6 +140,11 @@
 #     (högst var 6:e s, i stället för tipsen). Skannern skickar avståndet till handen (den blå rutan) till
 #     rösten, men bara när handmodellen bekräftat en hand: utan modell kan rutan vara bordet eller kroppen.
 #     Samma mätning som ändring 41: ättikan läses på 0,31 m men inte på 0,43 m. (2026-11-11)
+# 43. Två råd som fick testaren att flytta sig från ett läge där koden syntes (voice_guidance/engine.py):
+#     A. Efter att en kod lästs eller setts kommer första tipset efter 8 s, inte 4 s (NARA2: "håll stilla" och
+#        3 s senare "håll varan nära", tre gånger). B. En tunn läsning högst 0,30 m bort (kodens djup, annars
+#        handens) ger "håll stilla" i stället för "sakta närmare" (NARA4: tre gånger "närmare" på 0,26-0,27 m och
+#        3,0 px/modul). Skannern själv är oförändrad: loggraden har redan "distance_m". (2026-11-13)
 # Ingen säkerhetsregel (gå närmare / vrid) är inlagd: tröskeln måste först mätas upp
 # per läge ur dessa loggar och valideras på andra körningar än de den togs fram på.
 # Fristående (läser bara scan_filters.py). Kör ALDRIG samtidigt som detect_spatial.py.

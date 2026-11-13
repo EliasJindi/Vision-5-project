@@ -1,6 +1,6 @@
 import unittest
 
-from voice_guidance import (ActionKind, DictProductCatalog, EmptyProductCatalog, FrameObservation, GuidanceAction,
+from voice_guidance import (ActionKind, CodeRead, DictProductCatalog, EmptyProductCatalog, FrameObservation, GuidanceAction,
                             GuidanceConfig, GuidanceEngine)
 
 from tests.helpers import EAN_A, EAN_B, frame, read
@@ -243,8 +243,8 @@ class SeenCodeTest(unittest.TestCase):
         kinds_said = kinds(engine.update(seen(float(t), (0.5, 0.5))) for t in range(20))
         self.assertNotIn(ActionKind.NO_CODE, kinds_said)
         self.assertIn(ActionKind.STEADY, kinds_said)
-        self.assertIsNone(engine.update(frame(21.0)))                       # 2 s efter sista synen: vänta
-        self.assertEqual(engine.update(frame(23.0)).kind, ActionKind.NO_CODE)   # 4 s efter sista synen
+        self.assertIsNone(engine.update(frame(23.0)))                       # 4 s efter sista synen: vänta (A, 13/11)
+        self.assertEqual(engine.update(frame(27.0)).kind, ActionKind.NO_CODE)   # 8 s efter sista synen
 
     def test_reads_take_precedence_over_what_the_detector_sees(self):
         engine = GuidanceEngine(CATALOG)
@@ -284,9 +284,9 @@ class NextProductTest(unittest.TestCase):
     def test_a_seen_code_in_a_confirmed_hand_starts_a_new_search(self):
         self.ready()
         self.assertEqual(self.engine.update(seen_in_hand(13.0, (0.5, 0.95))).kind, ActionKind.CODE_BELOW)
-        self.assertIsNone(self.engine.update(frame(15.0)))
-        self.assertEqual(self.engine.update(frame(17.0)).kind, ActionKind.NO_CODE)   # tipsen är tillbaka
-        self.assertEqual(self.engine.update(seen_in_hand(20.0, (0.5, 0.5))).kind, ActionKind.STEADY)
+        self.assertIsNone(self.engine.update(frame(17.0)))
+        self.assertEqual(self.engine.update(frame(21.0)).kind, ActionKind.NO_CODE)   # tipsen är tillbaka, 8 s efter koden
+        self.assertEqual(self.engine.update(seen_in_hand(24.0, (0.5, 0.5))).kind, ActionKind.STEADY)
 
     def test_the_new_product_is_confirmed_as_usual(self):
         self.ready()
@@ -463,6 +463,67 @@ class FarHandTest(unittest.TestCase):
         self.assertIsNone(FrameObservation(0.0).hand_m)
 
 
+class AfterACodeTest(unittest.TestCase):
+    """13/11, ändring 43. A: efter en kod väntar första tipset 8 s. B: tunn läsning nära ger "håll stilla"."""
+
+    def setUp(self):
+        self.engine = GuidanceEngine(CATALOG)
+
+    def speak(self, frames):
+        return [(obs.t, a.kind) for obs in frames if (a := self.engine.update(obs))]
+
+    def test_at_the_start_the_first_hint_still_comes_after_four_seconds(self):
+        self.assertEqual(self.speak([frame(t / 2) for t in range(0, 9)]), [(4.0, ActionKind.NO_CODE)])
+
+    def test_after_steady_the_hints_wait_eight_seconds_not_four(self):
+        # NARA2 14:14:34 "håll stilla", 14:14:37 "håll varan nära": en säker läsning, sedan ingen kod
+        said = self.speak([frame(0.0, read())] + [frame(t / 2) for t in range(1, 21)])
+        self.assertEqual(said, [(1.0, ActionKind.STEADY), (8.0, ActionKind.NO_CODE)])
+
+    def test_the_rhythm_after_the_first_hint_is_unchanged(self):
+        said = self.speak([frame(0.0, read(thin=True))] + [frame(t / 2) for t in range(1, 61)])
+        self.assertEqual([t for t, k in said if k in (ActionKind.NO_CODE, ActionKind.NO_CODE_TURN,
+                                                       ActionKind.NO_CODE_FLIP)], [8.0, 14.0, 20.0, 30.0])
+
+    def test_equal_values_give_the_old_behaviour(self):
+        self.engine = GuidanceEngine(CATALOG, GuidanceConfig(no_code_after_code_s=4.0))
+        said = self.speak([frame(0.0, read(thin=True))] + [frame(t / 2) for t in range(1, 11)])
+        self.assertEqual([t for t, k in said if k is ActionKind.NO_CODE], [4.0])
+
+    def test_shorter_than_the_start_delay_is_an_error(self):
+        with self.assertRaises(ValueError):
+            GuidanceConfig(no_code_after_code_s=3.0)
+
+    def test_a_thin_read_close_by_gets_steady_not_closer(self):
+        # NARA4 14:22:05: tunn läsning på 0,27 m och 3,0 px/modul gav "sakta närmare"
+        obs = FrameObservation(0.0, (CodeRead(EAN_A, (0.5, 0.5), True, distance_m=0.27),))
+        self.assertEqual(self.engine.update(obs).kind, ActionKind.STEADY)
+
+    def test_a_thin_read_further_away_still_gets_closer(self):
+        obs = FrameObservation(0.0, (CodeRead(EAN_A, (0.5, 0.5), True, distance_m=0.36),))
+        self.assertEqual(self.engine.update(obs).kind, ActionKind.CLOSER)
+
+    def test_without_distance_the_hand_is_used_and_without_both_it_is_as_before(self):
+        self.assertEqual(self.engine.update(FrameObservation(0.0, (read(thin=True),), hand=True, hand_m=0.28)).kind,
+                         ActionKind.STEADY)
+        engine = GuidanceEngine(CATALOG)
+        self.assertEqual(engine.update(frame(0.0, read(thin=True))).kind, ActionKind.CLOSER)
+
+    def test_a_code_at_the_edge_still_gets_a_direction_when_close(self):
+        obs = FrameObservation(0.0, (CodeRead(EAN_A, (0.5, 0.95), True, distance_m=0.27),))
+        self.assertEqual(self.engine.update(obs).kind, ActionKind.CODE_BELOW)
+
+    def test_steady_close_by_still_pips_when_held_back(self):
+        close = lambda t: FrameObservation(t, (CodeRead(EAN_A, (0.5, 0.5), True, distance_m=0.27),))
+        said = [a.kind if a else None for a in (self.engine.update(close(t)) for t in (0.0, 1.0, 2.5))]
+        self.assertEqual(said, [ActionKind.STEADY, None, ActionKind.CODE_SEEN])
+
+    def test_near_enough_zero_turns_b_off(self):
+        engine = GuidanceEngine(CATALOG, GuidanceConfig(near_enough_m=0))
+        obs = FrameObservation(0.0, (CodeRead(EAN_A, (0.5, 0.5), True, distance_m=0.27),))
+        self.assertEqual(engine.update(obs).kind, ActionKind.CLOSER)
+
+
 class ConflictTest(unittest.TestCase):
     def setUp(self):
         self.engine = GuidanceEngine(CATALOG)
@@ -574,7 +635,7 @@ class NoCodeTest(unittest.TestCase):
     def test_a_code_starts_a_new_search(self):
         self.run_empty(0.0, 30.0)                                   # tre gånger, sedan tyst
         self.assertEqual(self.engine.update(frame(31.0, read(thin=True))).kind, ActionKind.CLOSER)
-        self.assertEqual(self.run_empty(31.5, 40.0), [(35.0, ActionKind.NO_CODE)])   # 4 s efter koden
+        self.assertEqual(self.run_empty(31.5, 40.0), [(39.0, ActionKind.NO_CODE)])   # 8 s efter koden (A, 13/11)
 
     def test_after_a_successful_scan_it_says_ready_once_instead_of_no_code(self):
         self.engine.update(frame(0.0, read()))
@@ -598,8 +659,8 @@ class NoCodeTest(unittest.TestCase):
         self.engine.update(frame(5.0, read(EAN_B, thin=True)))      # nästa vara dyker upp innan "redo"
         said = self.run_empty(5.5, 40.0)
         self.assertNotIn(ActionKind.READY, [k for _, k in said])
-        self.assertEqual(said, [(9.0, ActionKind.NO_CODE), (15.0, ActionKind.NO_CODE_TURN),
-                                (21.0, ActionKind.NO_CODE_FLIP), (31.0, ActionKind.NO_CODE)])
+        self.assertEqual(said, [(13.0, ActionKind.NO_CODE), (19.0, ActionKind.NO_CODE_TURN),   # 8 s efter koden
+                                (25.0, ActionKind.NO_CODE_FLIP), (35.0, ActionKind.NO_CODE)])
 
     def test_the_same_product_glimpsed_after_it_was_forgotten_does_not_restart_the_hints(self):
         # Provet 5/11: tomatpurén bekräftad, borta i över 5 s, en enda läsning till, sedan "hittar ingen streckkod".
@@ -616,7 +677,7 @@ class NoCodeTest(unittest.TestCase):
         self.engine.update(frame(10.0, read(EAN_B, thin=True)))     # ny sökning: en annan vara
         self.run_empty(10.5, 20.5)                                  # tips 1 och 2
         self.engine.update(frame(21.0, read(EAN_A, thin=True)))     # tomatpurén igen, mitt i sökningen
-        self.assertEqual(self.run_empty(21.5, 26.0)[0], (25.0, ActionKind.NO_CODE))   # tipsen börjar om
+        self.assertEqual(self.run_empty(21.5, 30.0)[0], (29.0, ActionKind.NO_CODE))   # tipsen börjar om, 8 s efter koden
 
     def test_ready_after_zero_never_says_ready(self):
         engine = GuidanceEngine(CATALOG, GuidanceConfig(ready_after_s=0))
@@ -628,7 +689,7 @@ class NoCodeTest(unittest.TestCase):
         self.engine.update(frame(0.0, read()))
         self.engine.update(frame(0.5, read()))                      # tomatpurén bekräftad
         self.engine.update(frame(20.0, read(EAN_B, thin=True)))     # en annan vara dyker upp, osäker
-        self.assertEqual(self.run_empty(20.5, 30.0), [(24.0, ActionKind.NO_CODE), (30.0, ActionKind.NO_CODE_TURN)])
+        self.assertEqual(self.run_empty(20.5, 34.0), [(28.0, ActionKind.NO_CODE), (34.0, ActionKind.NO_CODE_TURN)])
 
     def test_zero_disables_the_hints(self):
         engine = GuidanceEngine(CATALOG, GuidanceConfig(no_code_fast=0, no_code_slow_repeat_s=0))
